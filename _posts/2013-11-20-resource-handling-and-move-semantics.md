@@ -41,7 +41,8 @@ handler
 
 ## A minimal resource handler
 
-A minimal resource handling class shall accept a resource identifier in its constructor and destroy it in the destructor.
+A minimal resource handling class shall accept a resource identifier in its
+constructor and destroy it in the destructor.
 E.g.
 
 ~~~~~~~~~cpp
@@ -237,24 +238,32 @@ Alternative ways to implement move semantics do exist e.g. add a mutable guard
 data member that is set to false when the object loses ownership of the
 resource handle and avoids destroying the resource if the object does not own
 it. The problem with this approach is that it allows to move any const object
-preventing the implementation of e.g. the [safe `auto_ptr` idiom](http://www.gotw.ca/publications/using_auto_ptr_effectively.htm)
+preventing the implementation of e.g. the 
+[safe `auto_ptr` idiom](http://www.gotw.ca/publications/using_auto_ptr_effectively.htm)
 
-Move semantics and standard containers
-In cases where all the objects in the container must be destroyed together at the same time: instead of storing resource handlers as elements in standard containers you can simply:
 
-wrap a container instance with a resource handler
+## Move semantics and standard containers
+
+In cases where all the objects in the container must be destroyed together at
+the same time, instead of storing resource handlers as elements in standard
+containers you can simply wrap a container instance with a resource handler
 store the actual resource handle (e.g. a memory pointer) inside the container
-the handler's destructor will take care of iterating over the container and release every resource one by one.
+the handler's destructor will take care of iterating over the container and
+release every resource one by one.
 
-In cases where resource handlers can be inserted and removed into/from the container: use the approach described above and
+In cases where resource handlers can be inserted and removed into/from the
+container: use the approach described above and
 
-wrap elements with resource handlers when removed from the container
-extract resource handles from handlers when adding resources to the container
-The only addition to the MemoryHandler class required to make this strategy work is a release() method which resets the internal pointer to 0 and returns the previously stored pointer.
+wrap elements with resource handlers when removed from the container extract
+resource handles from handlers when adding resources to the container The only
+addition to the MemoryHandler class required to make this strategy work is a
+release() method which resets the internal pointer to 0 and returns the
+previously stored pointer.
 
 The code to manage a set of handles within a container then looks like:
 
-[code lang="cpp"]
+
+~~~~~~~~~cpp
 //create a handler wrapping a heap allocated standard container
 MemoryHandler< std::vector< int* > > handler(new std::vector< int* >);
 std::vector<int*>& handles = *handler.ptr();
@@ -270,791 +279,160 @@ handles.push_back(mhIn.release());
 MemoryHandler mhOut(handles.front());
 //manually reset the pointer in the container:
 handles.front() = 0; //moved; need to do this automatically
-[/code]
+~~~~~~~~~~~~
 
-To perform the resource extraction and automatically reset the source handle in one call you can use a simple releaset function:
+To perform the resource extraction and automatically reset the source handle in
+one call you can use a simple release function:
 
-[code lang="cpp"]
+~~~~~~~~~cpp
 template < typename T >
 T* release(T*& rh) {
-T* ret = rh;
-rh = 0;
-return ret;
+    T* ret = rh;
+    rh = 0;
+    return ret;
 }
-[/code]
+~~~~~~~~~~~~
 
 The code to perform the actual resource extraction and reset then becomes:
 
-[code lang="cpp" firstline="13"]
+~~~~~~~~~cpp
 MemoryHandler< int > mhOut(reset(handles.front()));
-[/code]
+~~~~~~~~~~~~
 
 without the need to explicitly set the std::vector element to zero.
 
-Whether you decide to physically remove the element from the vector or not it is not a problem since it will not cause any error upon destruction of the container.
+Whether you decide to physically remove the element from the vector or not it is
+not a problem since it will not cause any error upon destruction of the
+container.
 
-C++ 11
+## C++ 11
 If you can use a C++ 11 conformant-enough compiler such as:
 
-gcc >= 4.8
-clang llvm >= 3.2
-Intel icc >= 14.0
-PGI >= 13.1
-Microsoft VS >= 2012
-you can avoid tricks and hacks and simply use r-value references to perform the move.
+* gcc >= 4.8
+* clang llvm >= 3.2
+* Intel icc >= 14.0
+* PGI >= 13.1
+* Microsoft VS >= 2012
 
-Here is the same MemoryHandler class implemented with r-value references and calls to std::move when needed.
+you can avoid tricks and hacks and simply use r-value references to perform the
+move.
 
-[code language="cpp"]
+Here is the same MemoryHandler class implemented with r-value references and
+calls to std::move when needed.
+
+~~~~~~~~~cpp
 template < typename T >
 class MemoryHandler {
 private:
-struct Proxy {
-T* ptr;
-};
+    struct Proxy {
+        T* ptr;
+    };
 public:
-MemoryHandler(MemoryHandler&& mh) : ptr_(mh.ptr_) {
-mh.ptr_ = 0;
-}
-MemoryHandler(const MemoryHandler&) = delete;
-explicit MemoryHandler(T* ptr = 0) : ptr_(ptr) {}
-T* ptr() { return ptr_; }
-~MemoryHandler() {
-delete ptr_; //it is fine to call 'delete 0'
-}
-MemoryHandler& operator=(MemoryHandler&& mh) {
-MemoryHandler(mh).Swap(*this);
-return *this;
-}
-MemoryHandler& operator=(const MemoryHandler& mh) = delete;
+    MemoryHandler(MemoryHandler&& mh) : ptr_(mh.ptr_) {
+        mh.ptr_ = 0;
+    }
+    MemoryHandler(const MemoryHandler&) = delete;
+    explicit MemoryHandler(T* ptr = 0) : ptr_(ptr) {}
+    T* ptr() { return ptr_; }
+    ~MemoryHandler() {
+        delete ptr_; //it is fine to call 'delete 0'
+    }
+    MemoryHandler& operator=(MemoryHandler&& mh) {
+        MemoryHandler(mh).Swap(*this);
+        return *this;
+    }
+    MemoryHandler& operator=(const MemoryHandler& mh) = delete;
 private:
-void Swap(MemoryHandler& mh) {
-std::swap(mh.ptr_, ptr_);
-}
+    void Swap(MemoryHandler& mh) {
+        std::swap(mh.ptr_, ptr_);
+    }
 private:
-T* ptr_;
+    T* ptr_;
 };
-[/code]
+~~~~~~~~~~~~
 
-If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you will need to use the various strategies outlined in the previous sections for the foreseeable future.
+If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you
+will need to use the various strategies outlined in the previous sections for
+the foreseeable future.
 
 One more thing...
-Automatic resource management techniques are applied to a number of types other than memory pointer, in my case I use sockets (regular and zmq), threads, OpenCL memory objects, CUDA and OpenGL resources; it is however always possible to use versions of the MemoryHandler implemented in this article by simply wrapping the resource handles with a heap allocated instance of a wrapper class. e.g.
-[code lang="cpp" light="true"]
+
+Automatic resource management techniques can be applied to types other than
+memory pointers, in my case I use sockets (regular and zmq), threads, OpenCL
+memory objects, CUDA and OpenGL resources; it is however always possible to
+use versions of the MemoryHandler implemented in this article by simply
+wrapping the resource handles with a heap allocated instance of a wrapper
+class. e.g.
+
+~~~~~~~~~cpp
 class Socket {
 public:
-Socket(int s) : socket_(s) {}
-int get() { return socket_; }
-~Socket() { close(socket_); }
+    Socket(int s) : socket_(s) {}
+    int get() { return socket_; }
+    ~Socket() { close(socket_); }
 private:
-int socket_;
+    int socket_;
 };
 ...
 MemoryHandler< Socket >
 sh(new Socket(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)));
 int aSocket = sh.ptr()->get();
-[/code]
-If you want to avoid memory management operations you can always define a generic Handler class using policy based design, you'll need policies for:
+~~~~~~~~~~~~
 
-validation: to detect if a resource can be safely disposed
-setting an empty/invalid value: to signal the wapper object it has lost ownership of the resource and must not try to dispose it
-releasing the resource: to dispose the resoure upon destruction of the resource handler instance
-Note that you usually do need an implementation of policy-based design or strategy pattern to properly dipose the resource through a release function provided by client code to the handler class; one example is the case of arrays: a delete [] operator has to be invoked instead of delete.
+If you want to avoid memory management operations you can always define a
+generic Handler class using policy based design, you'll need policies for:
 
-A reworked version of the MemoryHandler class is shown below (C++11 version only).
-[code lang="cpp" light="true"]
+validation: to detect if a resource can be safely disposed setting an
+empty/invalid value: to signal the wapper object it has lost ownership of the
+resource and must not try to dispose it releasing the resource: to dispose the
+resoure upon destruction of the resource handler instance Note that you usually
+do need an implementation of policy-based design or strategy pattern to properly
+dipose the resource through a release function provided by client code to the
+handler class; one example is the case of arrays: a delete [] operator has to be
+invoked instead of delete.
+
+A reworked version of the MemoryHandler class is shown below (C++11 version
+only).
+
+~~~~~~~~~cpp
 template <typename T,
-typename ValidationPolicy,
-typename ResetPolicy,
-typename ReleasePolicy>
+          typename ValidationPolicy,
+          typename ResetPolicy,
+          typename ReleasePolicy>
 class Handler {
 public:
-Handler(Handler&& h) : res_(h.res_) {
-ReleasePolicy::Reset(h.res_);
-}
-Handler(const Handler&) = delete;
-explicit Handler(T res = T()) : res_(res) {
-ReleasePolicy::Reset(res_);
-}
-T& get() { return res_; }
-const T& get() const { return res_; }
-~Handler() {
-if(ValidationPolicy::Valid(res_)) {
-ReleasePolicy::Release(res_);
-}
-}
-//Handler(Handler&&) automatically invoked if needed
-Handler& operator=(Handler h) {
-h.Swap(*this);
-return *this;
-}
-Handler& operator=(const Handler&) = delete;
+    Handler(Handler&& h) : res_(h.res_) {
+        ReleasePolicy::Reset(h.res_);
+    }
+    Handler(const Handler&) = delete;
+    explicit Handler(T res = T()) : res_(res) {
+        ReleasePolicy::Reset(res_);
+    }
+    T& get() { return res_; }
+    const T& get() const { return res_; }
+    ~Handler() {
+        if(ValidationPolicy::Valid(res_)) {
+            ReleasePolicy::Release(res_);
+        }
+    }
+    //Handler(Handler&&) automatically invoked if needed
+    Handler& operator=(Handler h) {
+        h.Swap(*this);
+        return *this;
+    }
+    Handler& operator=(const Handler&) = delete;
 private:
-void Swap(Handler& h) {
-std::swap(h.res_, res_);
-}
+    void Swap(Handler& h) {
+        std::swap(h.res_, res_);
+    }
 private:
-T res_;
+    T res_;
 };
-[/code]
+~~~~~~~~~~~~
 
-C++11 standard collections do support move semantics out of the box through r-value references, it is therefore possible to move objects into collections through the std::move function.
+C++11 standard collections do support move semantics out of the box through
+r-value references, it is therefore possible to move objects into collections
+through the std::move function.
 
-Code
-Sample code is available on GitHub at this address.
+Code Sample code is available on GitHub at this address.
 
-Move semantics and standard containers
-In cases where all the objects in the container must be destroyed together at the same time: instead of storing resource handlers as elements in standard containers you can simply:
-
-wrap a container instance with a resource handler
-store the actual resource handle (e.g. a memory pointer) inside the container
-the handler's destructor will take care of iterating over the container and release every resource one by one.
-
-In cases where resource handlers can be inserted and removed into/from the container: use the approach described above and
-
-wrap elements with resource handlers when removed from the container
-extract resource handles from handlers when adding resources to the container
-The only addition to the MemoryHandler class required to make this strategy work is a release() method which resets the internal pointer to 0 and returns the previously stored pointer.
-
-The code to manage a set of handles within a container then looks like:
-
-[code lang="cpp"]
-//create a handler wrapping a heap allocated standard container
-MemoryHandler< std::vector< int* > > handler(new std::vector< int* >);
-std::vector<int*>& handles = *handler.ptr();
-MemoryHandler mhIn(CreateHandler(...));
-....
-//store the pointer into the collection and set the internal pointer
-//to zero inside the memory handler
-handles.push_back(mhIn.release());
-...
-//extract a pointer from the container; will not reset the pointer
-//inside the container, so you end up with two pointers referencing
-//the same memory location
-MemoryHandler mhOut(handles.front());
-//manually reset the pointer in the container:
-handles.front() = 0; //moved; need to do this automatically
-[/code]
-
-To perform the resource extraction and automatically reset the source handle in one call you can use a simple releaset function:
-
-[code lang="cpp"]
-template < typename T >
-T* release(T*& rh) {
-T* ret = rh;
-rh = 0;
-return ret;
-}
-[/code]
-
-The code to perform the actual resource extraction and reset then becomes:
-
-[code lang="cpp" firstline="13"]
-MemoryHandler< int > mhOut(reset(handles.front()));
-[/code]
-
-without the need to explicitly set the std::vector element to zero.
-
-Whether you decide to physically remove the element from the vector or not it is not a problem since it will not cause any error upon destruction of the container.
-
-C++ 11
-If you can use a C++ 11 conformant-enough compiler such as:
-
-gcc >= 4.8
-clang llvm >= 3.2
-Intel icc >= 14.0
-PGI >= 13.1
-Microsoft VS >= 2012
-you can avoid tricks and hacks and simply use r-value references to perform the move.
-
-Here is the same MemoryHandler class implemented with r-value references and calls to std::move when needed.
-
-[code language="cpp"]
-template < typename T >
-class MemoryHandler {
-private:
-struct Proxy {
-T* ptr;
-};
-public:
-MemoryHandler(MemoryHandler&& mh) : ptr_(mh.ptr_) {
-mh.ptr_ = 0;
-}
-MemoryHandler(const MemoryHandler&) = delete;
-explicit MemoryHandler(T* ptr = 0) : ptr_(ptr) {}
-T* ptr() { return ptr_; }
-~MemoryHandler() {
-delete ptr_; //it is fine to call 'delete 0'
-}
-MemoryHandler& operator=(MemoryHandler&& mh) {
-MemoryHandler(mh).Swap(*this);
-return *this;
-}
-MemoryHandler& operator=(const MemoryHandler& mh) = delete;
-private:
-void Swap(MemoryHandler& mh) {
-std::swap(mh.ptr_, ptr_);
-}
-private:
-T* ptr_;
-};
-[/code]
-
-If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you will need to use the various strategies outlined in the previous sections for the foreseeable future.
-
-One more thing...
-Automatic resource management techniques are applied to a number of types other than memory pointer, in my case I use sockets (regular and zmq), threads, OpenCL memory objects, CUDA and OpenGL resources; it is however always possible to use versions of the MemoryHandler implemented in this article by simply wrapping the resource handles with a heap allocated instance of a wrapper class. e.g.
-[code lang="cpp" light="true"]
-class Socket {
-public:
-Socket(int s) : socket_(s) {}
-int get() { return socket_; }
-~Socket() { close(socket_); }
-private:
-int socket_;
-};
-...
-MemoryHandler< Socket >
-sh(new Socket(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)));
-int aSocket = sh.ptr()->get();
-[/code]
-If you want to avoid memory management operations you can always define a generic Handler class using policy based design, you'll need policies for:
-
-validation: to detect if a resource can be safely disposed
-setting an empty/invalid value: to signal the wapper object it has lost ownership of the resource and must not try to dispose it
-releasing the resource: to dispose the resoure upon destruction of the resource handler instance
-Note that you usually do need an implementation of policy-based design or strategy pattern to properly dipose the resource through a release function provided by client code to the handler class; one example is the case of arrays: a delete [] operator has to be invoked instead of delete.
-
-A reworked version of the MemoryHandler class is shown below (C++11 version only).
-[code lang="cpp" light="true"]
-template <typename T,
-typename ValidationPolicy,
-typename ResetPolicy,
-typename ReleasePolicy>
-class Handler {
-public:
-Handler(Handler&& h) : res_(h.res_) {
-ReleasePolicy::Reset(h.res_);
-}
-Handler(const Handler&) = delete;
-explicit Handler(T res = T()) : res_(res) {
-ReleasePolicy::Reset(res_);
-}
-T& get() { return res_; }
-const T& get() const { return res_; }
-~Handler() {
-if(ValidationPolicy::Valid(res_)) {
-ReleasePolicy::Release(res_);
-}
-}
-//Handler(Handler&&) automatically invoked if needed
-Handler& operator=(Handler h) {
-h.Swap(*this);
-return *this;
-}
-Handler& operator=(const Handler&) = delete;
-private:
-void Swap(Handler& h) {
-std::swap(h.res_, res_);
-}
-private:
-T res_;
-};
-[/code]
-
-C++11 standard collections do support move semantics out of the box through r-value references, it is therefore possible to move objects into collections through the std::move function.
-
-Code
-Sample code is available on GitHub at this address.
-
-Move semantics and standard containers
-In cases where all the objects in the container must be destroyed together at the same time: instead of storing resource handlers as elements in standard containers you can simply:
-
-wrap a container instance with a resource handler
-store the actual resource handle (e.g. a memory pointer) inside the container
-the handler's destructor will take care of iterating over the container and release every resource one by one.
-
-In cases where resource handlers can be inserted and removed into/from the container: use the approach described above and
-
-wrap elements with resource handlers when removed from the container
-extract resource handles from handlers when adding resources to the container
-The only addition to the MemoryHandler class required to make this strategy work is a release() method which resets the internal pointer to 0 and returns the previously stored pointer.
-
-The code to manage a set of handles within a container then looks like:
-
-[code lang="cpp"]
-//create a handler wrapping a heap allocated standard container
-MemoryHandler< std::vector< int* > > handler(new std::vector< int* >);
-std::vector<int*>& handles = *handler.ptr();
-MemoryHandler mhIn(CreateHandler(...));
-....
-//store the pointer into the collection and set the internal pointer
-//to zero inside the memory handler
-handles.push_back(mhIn.release());
-...
-//extract a pointer from the container; will not reset the pointer
-//inside the container, so you end up with two pointers referencing
-//the same memory location
-MemoryHandler mhOut(handles.front());
-//manually reset the pointer in the container:
-handles.front() = 0; //moved; need to do this automatically
-[/code]
-
-To perform the resource extraction and automatically reset the source handle in one call you can use a simple releaset function:
-
-[code lang="cpp"]
-template < typename T >
-T* release(T*& rh) {
-T* ret = rh;
-rh = 0;
-return ret;
-}
-[/code]
-
-The code to perform the actual resource extraction and reset then becomes:
-
-[code lang="cpp" firstline="13"]
-MemoryHandler< int > mhOut(reset(handles.front()));
-[/code]
-
-without the need to explicitly set the std::vector element to zero.
-
-Whether you decide to physically remove the element from the vector or not it is not a problem since it will not cause any error upon destruction of the container.
-
-C++ 11
-If you can use a C++ 11 conformant-enough compiler such as:
-
-gcc >= 4.8
-clang llvm >= 3.2
-Intel icc >= 14.0
-PGI >= 13.1
-Microsoft VS >= 2012
-you can avoid tricks and hacks and simply use r-value references to perform the move.
-
-Here is the same MemoryHandler class implemented with r-value references and calls to std::move when needed.
-
-[code language="cpp"]
-template < typename T >
-class MemoryHandler {
-private:
-struct Proxy {
-T* ptr;
-};
-public:
-MemoryHandler(MemoryHandler&& mh) : ptr_(mh.ptr_) {
-mh.ptr_ = 0;
-}
-MemoryHandler(const MemoryHandler&) = delete;
-explicit MemoryHandler(T* ptr = 0) : ptr_(ptr) {}
-T* ptr() { return ptr_; }
-~MemoryHandler() {
-delete ptr_; //it is fine to call 'delete 0'
-}
-MemoryHandler& operator=(MemoryHandler&& mh) {
-MemoryHandler(mh).Swap(*this);
-return *this;
-}
-MemoryHandler& operator=(const MemoryHandler& mh) = delete;
-private:
-void Swap(MemoryHandler& mh) {
-std::swap(mh.ptr_, ptr_);
-}
-private:
-T* ptr_;
-};
-[/code]
-
-If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you will need to use the various strategies outlined in the previous sections for the foreseeable future.
-
-One more thing...
-Automatic resource management techniques are applied to a number of types other than memory pointer, in my case I use sockets (regular and zmq), threads, OpenCL memory objects, CUDA and OpenGL resources; it is however always possible to use versions of the MemoryHandler implemented in this article by simply wrapping the resource handles with a heap allocated instance of a wrapper class. e.g.
-[code lang="cpp" light="true"]
-class Socket {
-public:
-Socket(int s) : socket_(s) {}
-int get() { return socket_; }
-~Socket() { close(socket_); }
-private:
-int socket_;
-};
-...
-MemoryHandler< Socket >
-sh(new Socket(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)));
-int aSocket = sh.ptr()->get();
-[/code]
-If you want to avoid memory management operations you can always define a generic Handler class using policy based design, you'll need policies for:
-
-validation: to detect if a resource can be safely disposed
-setting an empty/invalid value: to signal the wapper object it has lost ownership of the resource and must not try to dispose it
-releasing the resource: to dispose the resoure upon destruction of the resource handler instance
-Note that you usually do need an implementation of policy-based design or strategy pattern to properly dipose the resource through a release function provided by client code to the handler class; one example is the case of arrays: a delete [] operator has to be invoked instead of delete.
-
-A reworked version of the MemoryHandler class is shown below (C++11 version only).
-[code lang="cpp" light="true"]
-template <typename T,
-typename ValidationPolicy,
-typename ResetPolicy,
-typename ReleasePolicy>
-class Handler {
-public:
-Handler(Handler&& h) : res_(h.res_) {
-ReleasePolicy::Reset(h.res_);
-}
-Handler(const Handler&) = delete;
-explicit Handler(T res = T()) : res_(res) {
-ReleasePolicy::Reset(res_);
-}
-T& get() { return res_; }
-const T& get() const { return res_; }
-~Handler() {
-if(ValidationPolicy::Valid(res_)) {
-ReleasePolicy::Release(res_);
-}
-}
-//Handler(Handler&&) automatically invoked if needed
-Handler& operator=(Handler h) {
-h.Swap(*this);
-return *this;
-}
-Handler& operator=(const Handler&) = delete;
-private:
-void Swap(Handler& h) {
-std::swap(h.res_, res_);
-}
-private:
-T res_;
-};
-[/code]
-
-C++11 standard collections do support move semantics out of the box through r-value references, it is therefore possible to move objects into collections through the std::move function.
-
-Code
-Sample code is available on GitHub at this address.
-
-Move semantics and standard containers
-In cases where all the objects in the container must be destroyed together at the same time: instead of storing resource handlers as elements in standard containers you can simply:
-
-wrap a container instance with a resource handler
-store the actual resource handle (e.g. a memory pointer) inside the container
-the handler's destructor will take care of iterating over the container and release every resource one by one.
-
-In cases where resource handlers can be inserted and removed into/from the container: use the approach described above and
-
-wrap elements with resource handlers when removed from the container
-extract resource handles from handlers when adding resources to the container
-The only addition to the MemoryHandler class required to make this strategy work is a release() method which resets the internal pointer to 0 and returns the previously stored pointer.
-
-The code to manage a set of handles within a container then looks like:
-
-[code lang="cpp"]
-//create a handler wrapping a heap allocated standard container
-MemoryHandler< std::vector< int* > > handler(new std::vector< int* >);
-std::vector<int*>& handles = *handler.ptr();
-MemoryHandler mhIn(CreateHandler(...));
-....
-//store the pointer into the collection and set the internal pointer
-//to zero inside the memory handler
-handles.push_back(mhIn.release());
-...
-//extract a pointer from the container; will not reset the pointer
-//inside the container, so you end up with two pointers referencing
-//the same memory location
-MemoryHandler mhOut(handles.front());
-//manually reset the pointer in the container:
-handles.front() = 0; //moved; need to do this automatically
-[/code]
-
-To perform the resource extraction and automatically reset the source handle in one call you can use a simple releaset function:
-
-[code lang="cpp"]
-template < typename T >
-T* release(T*& rh) {
-T* ret = rh;
-rh = 0;
-return ret;
-}
-[/code]
-
-The code to perform the actual resource extraction and reset then becomes:
-
-[code lang="cpp" firstline="13"]
-MemoryHandler< int > mhOut(reset(handles.front()));
-[/code]
-
-without the need to explicitly set the std::vector element to zero.
-
-Whether you decide to physically remove the element from the vector or not it is not a problem since it will not cause any error upon destruction of the container.
-
-C++ 11
-If you can use a C++ 11 conformant-enough compiler such as:
-
-gcc >= 4.8
-clang llvm >= 3.2
-Intel icc >= 14.0
-PGI >= 13.1
-Microsoft VS >= 2012
-you can avoid tricks and hacks and simply use r-value references to perform the move.
-
-Here is the same MemoryHandler class implemented with r-value references and calls to std::move when needed.
-
-[code language="cpp"]
-template < typename T >
-class MemoryHandler {
-private:
-struct Proxy {
-T* ptr;
-};
-public:
-MemoryHandler(MemoryHandler&& mh) : ptr_(mh.ptr_) {
-mh.ptr_ = 0;
-}
-MemoryHandler(const MemoryHandler&) = delete;
-explicit MemoryHandler(T* ptr = 0) : ptr_(ptr) {}
-T* ptr() { return ptr_; }
-~MemoryHandler() {
-delete ptr_; //it is fine to call 'delete 0'
-}
-MemoryHandler& operator=(MemoryHandler&& mh) {
-MemoryHandler(mh).Swap(*this);
-return *this;
-}
-MemoryHandler& operator=(const MemoryHandler& mh) = delete;
-private:
-void Swap(MemoryHandler& mh) {
-std::swap(mh.ptr_, ptr_);
-}
-private:
-T* ptr_;
-};
-[/code]
-
-If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you will need to use the various strategies outlined in the previous sections for the foreseeable future.
-
-One more thing...
-Automatic resource management techniques are applied to a number of types other than memory pointer, in my case I use sockets (regular and zmq), threads, OpenCL memory objects, CUDA and OpenGL resources; it is however always possible to use versions of the MemoryHandler implemented in this article by simply wrapping the resource handles with a heap allocated instance of a wrapper class. e.g.
-[code lang="cpp" light="true"]
-class Socket {
-public:
-Socket(int s) : socket_(s) {}
-int get() { return socket_; }
-~Socket() { close(socket_); }
-private:
-int socket_;
-};
-...
-MemoryHandler< Socket >
-sh(new Socket(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)));
-int aSocket = sh.ptr()->get();
-[/code]
-If you want to avoid memory management operations you can always define a generic Handler class using policy based design, you'll need policies for:
-
-validation: to detect if a resource can be safely disposed
-setting an empty/invalid value: to signal the wapper object it has lost ownership of the resource and must not try to dispose it
-releasing the resource: to dispose the resoure upon destruction of the resource handler instance
-Note that you usually do need an implementation of policy-based design or strategy pattern to properly dipose the resource through a release function provided by client code to the handler class; one example is the case of arrays: a delete [] operator has to be invoked instead of delete.
-
-A reworked version of the MemoryHandler class is shown below (C++11 version only).
-[code lang="cpp" light="true"]
-template <typename T,
-typename ValidationPolicy,
-typename ResetPolicy,
-typename ReleasePolicy>
-class Handler {
-public:
-Handler(Handler&& h) : res_(h.res_) {
-ReleasePolicy::Reset(h.res_);
-}
-Handler(const Handler&) = delete;
-explicit Handler(T res = T()) : res_(res) {
-ReleasePolicy::Reset(res_);
-}
-T& get() { return res_; }
-const T& get() const { return res_; }
-~Handler() {
-if(ValidationPolicy::Valid(res_)) {
-ReleasePolicy::Release(res_);
-}
-}
-//Handler(Handler&&) automatically invoked if needed
-Handler& operator=(Handler h) {
-h.Swap(*this);
-return *this;
-}
-Handler& operator=(const Handler&) = delete;
-private:
-void Swap(Handler& h) {
-std::swap(h.res_, res_);
-}
-private:
-T res_;
-};
-[/code]
-
-C++11 standard collections do support move semantics out of the box through r-value references, it is therefore possible to move objects into collections through the std::move function.
-
-Code
-Sample code is available on GitHub at this address.
-
-Move semantics and standard containers
-In cases where all the objects in the container must be destroyed together at the same time: instead of storing resource handlers as elements in standard containers you can simply:
-
-wrap a container instance with a resource handler
-store the actual resource handle (e.g. a memory pointer) inside the container
-the handler's destructor will take care of iterating over the container and release every resource one by one.
-
-In cases where resource handlers can be inserted and removed into/from the container: use the approach described above and
-
-wrap elements with resource handlers when removed from the container
-extract resource handles from handlers when adding resources to the container
-The only addition to the MemoryHandler class required to make this strategy work is a release() method which resets the internal pointer to 0 and returns the previously stored pointer.
-
-The code to manage a set of handles within a container then looks like:
-
-[code lang="cpp"]
-//create a handler wrapping a heap allocated standard container
-MemoryHandler< std::vector< int* > > handler(new std::vector< int* >);
-std::vector<int*>& handles = *handler.ptr();
-MemoryHandler mhIn(CreateHandler(...));
-....
-//store the pointer into the collection and set the internal pointer
-//to zero inside the memory handler
-handles.push_back(mhIn.release());
-...
-//extract a pointer from the container; will not reset the pointer
-//inside the container, so you end up with two pointers referencing
-//the same memory location
-MemoryHandler mhOut(handles.front());
-//manually reset the pointer in the container:
-handles.front() = 0; //moved; need to do this automatically
-[/code]
-
-To perform the resource extraction and automatically reset the source handle in one call you can use a simple releaset function:
-
-[code lang="cpp"]
-template < typename T >
-T* release(T*& rh) {
-T* ret = rh;
-rh = 0;
-return ret;
-}
-[/code]
-
-The code to perform the actual resource extraction and reset then becomes:
-
-[code lang="cpp" firstline="13"]
-MemoryHandler< int > mhOut(reset(handles.front()));
-[/code]
-
-without the need to explicitly set the std::vector element to zero.
-
-Whether you decide to physically remove the element from the vector or not it is not a problem since it will not cause any error upon destruction of the container.
-
-C++ 11
-If you can use a C++ 11 conformant-enough compiler such as:
-
-gcc >= 4.8
-clang llvm >= 3.2
-Intel icc >= 14.0
-PGI >= 13.1
-Microsoft VS >= 2012
-you can avoid tricks and hacks and simply use r-value references to perform the move.
-
-Here is the same MemoryHandler class implemented with r-value references and calls to std::move when needed.
-
-[code language="cpp"]
-template < typename T >
-class MemoryHandler {
-private:
-struct Proxy {
-T* ptr;
-};
-public:
-MemoryHandler(MemoryHandler&& mh) : ptr_(mh.ptr_) {
-mh.ptr_ = 0;
-}
-MemoryHandler(const MemoryHandler&) = delete;
-explicit MemoryHandler(T* ptr = 0) : ptr_(ptr) {}
-T* ptr() { return ptr_; }
-~MemoryHandler() {
-delete ptr_; //it is fine to call 'delete 0'
-}
-MemoryHandler& operator=(MemoryHandler&& mh) {
-MemoryHandler(mh).Swap(*this);
-return *this;
-}
-MemoryHandler& operator=(const MemoryHandler& mh) = delete;
-private:
-void Swap(MemoryHandler& mh) {
-std::swap(mh.ptr_, ptr_);
-}
-private:
-T* ptr_;
-};
-[/code]
-
-If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you will need to use the various strategies outlined in the previous sections for the foreseeable future.
-
-One more thing...
-Automatic resource management techniques are applied to a number of types other than memory pointer, in my case I use sockets (regular and zmq), threads, OpenCL memory objects, CUDA and OpenGL resources; it is however always possible to use versions of the MemoryHandler implemented in this article by simply wrapping the resource handles with a heap allocated instance of a wrapper class. e.g.
-[code lang="cpp" light="true"]
-class Socket {
-public:
-Socket(int s) : socket_(s) {}
-int get() { return socket_; }
-~Socket() { close(socket_); }
-private:
-int socket_;
-};
-...
-MemoryHandler< Socket >
-sh(new Socket(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)));
-int aSocket = sh.ptr()->get();
-[/code]
-If you want to avoid memory management operations you can always define a generic Handler class using policy based design, you'll need policies for:
-
-validation: to detect if a resource can be safely disposed
-setting an empty/invalid value: to signal the wapper object it has lost ownership of the resource and must not try to dispose it
-releasing the resource: to dispose the resoure upon destruction of the resource handler instance
-Note that you usually do need an implementation of policy-based design or strategy pattern to properly dipose the resource through a release function provided by client code to the handler class; one example is the case of arrays: a delete [] operator has to be invoked instead of delete.
-
-A reworked version of the MemoryHandler class is shown below (C++11 version only).
-[code lang="cpp" light="true"]
-template <typename T,
-typename ValidationPolicy,
-typename ResetPolicy,
-typename ReleasePolicy>
-class Handler {
-public:
-Handler(Handler&& h) : res_(h.res_) {
-ReleasePolicy::Reset(h.res_);
-}
-Handler(const Handler&) = delete;
-explicit Handler(T res = T()) : res_(res) {
-ReleasePolicy::Reset(res_);
-}
-T& get() { return res_; }
-const T& get() const { return res_; }
-~Handler() {
-if(ValidationPolicy::Valid(res_)) {
-ReleasePolicy::Release(res_);
-}
-}
-//Handler(Handler&&) automatically invoked if needed
-Handler& operator=(Handler h) {
-h.Swap(*this);
-return *this;
-}
-Handler& operator=(const Handler&) = delete;
-private:
-void Swap(Handler& h) {
-std::swap(h.res_, res_);
-}
-private:
-T res_;
-};
-[/code]
-
-C++11 standard collections do support move semantics out of the box through r-value references, it is therefore possible to move objects into collections through the std::move function.
-
-Code
-Sample code is available on GitHub at this address.

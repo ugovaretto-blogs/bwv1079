@@ -317,8 +317,8 @@ If you can use a C++ 11 conformant-enough compiler such as:
 you can avoid tricks and hacks and simply use r-value references to perform the
 move.
 
-Here is the same MemoryHandler class implemented with r-value references and
-calls to std::move when needed.
+Here is the same `MemoryHandler` class implemented with r-value references and
+calls to `std::move` when needed.
 
 ~~~~~~~~~cpp
 template < typename T >
@@ -360,7 +360,7 @@ One more thing...
 Automatic resource management techniques can be applied to types other than
 memory pointers, in my case I use sockets (regular and zmq), threads, OpenCL
 memory objects, CUDA and OpenGL resources; it is however always possible to
-use versions of the MemoryHandler implemented in this article by simply
+use versions of the `MemoryHandler` implemented in this article by simply
 wrapping the resource handles with a heap allocated instance of a wrapper
 class. e.g.
 
@@ -388,7 +388,7 @@ resource and must not try to dispose it releasing the resource: to dispose the
 resoure upon destruction of the resource handler instance Note that you usually
 do need an implementation of policy-based design or strategy pattern to properly
 dipose the resource through a release function provided by client code to the
-handler class; one example is the case of arrays: a delete [] operator has to be
+handler class; one example is the case of arrays: a `delete []` operator has to be
 invoked instead of delete.
 
 A reworked version of the MemoryHandler class is shown below (C++11 version
@@ -432,7 +432,9 @@ private:
 
 C++11 standard collections do support move semantics out of the box through
 r-value references, it is therefore possible to move objects into collections
-through the std::move function.
+through the `std::move` function.
 
-Code Sample code is available on GitHub at this address.
+## Code 
+
+[Sample code is available on GitHub](https://github.com/ugovaretto/cpp11-scratch/blob/master/training/res-handler-1.cpp).
 

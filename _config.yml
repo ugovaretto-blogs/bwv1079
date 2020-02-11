@@ -16,10 +16,10 @@
 title: Quaerendo invenietis
 email: candycode@gmail.com
 description: études in code # this means to ignore newlines until "baseurl:"
-baseurl: "/bwv1079" # the subpath of your site, e.g. /blog
-url: "" # the base hostname & protocol for your site, e.g. http://example.com
-twitter_username: jekyllrb
-github_username:  jekyll
+baseurl: /bwv1079 # the subpath of your site, e.g. /blog
+url: ugovaretto.github.io # the base hostname & protocol for your site, e.g. http://example.com
+#twitter_username: jekyllrb
+github_username: ugovaretto
 
 # Build settings
 markdown: kramdown

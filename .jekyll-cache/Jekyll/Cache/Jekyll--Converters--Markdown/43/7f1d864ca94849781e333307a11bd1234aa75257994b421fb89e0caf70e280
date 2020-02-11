@@ -1,0 +1,442 @@
+I"�<p>/bwv1079 http://localhost:5001</p>
+<h1 id="resource-handling-and-move-semantics">Resource handling and move semantics</h1>
+
+<p>Techniques to automatically manage the run-time lifetime of resources include 
+reference counting, where multiple references to the same resource exist, and 
+ownership transfer where only a single reference to a resource at any given 
+time does exist.</p>
+
+<p>The two approaches result in a completely different set of implementation 
+challenges:</p>
+
+<ul>
+  <li><em>Shared ownership</em>: reference cycles (two objects pointing at each other)
+ and serialized access to the reference counter and possibly the resource
+ itself (through e.g. overloading of the -&gt; operator)</li>
+  <li><em>Single ownership</em>: copy construction from a source object and reset of
+ the resource reference in the source object itself to avoid multiple 
+ destruction attempts</li>
+</ul>
+
+<p>This post describes a possible implementation, in both C++98 and C++11 
+language standards, for a resource handler with ownership transfer
+similar to <code class="highlighter-rouge">auto_ptr/unique_ptr</code> to be used for resources such as file
+descriptors/streams, sockets and memory pointers.</p>
+
+<h3 id="glossary">Glossary</h3>
+
+<dl>
+  <dt>resource</dt>
+  <dd>
+    <blockquote>
+      <p>any entity that follows a create-use-dispose run-time usage pattern</p>
+    </blockquote>
+  </dd>
+  <dt>handle</dt>
+  <dd>
+    <blockquote>
+      <p>the actual resource identifier: memory pointers, file and socket
+  descriptors, OpenGL resources, OpenCL memory objects…</p>
+    </blockquote>
+  </dd>
+  <dt>handler</dt>
+  <dd>
+    <blockquote>
+      <p>the class wrapping resource handles</p>
+    </blockquote>
+  </dd>
+</dl>
+
+<h2 id="a-minimal-resource-handler">A minimal resource handler</h2>
+
+<p>A minimal resource handling class shall accept a resource identifier in its
+constructor and destroy it in the destructor.
+E.g.</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span> <span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+<span class="k">class</span> <span class="nc">MemoryHandler</span> <span class="p">{</span>
+<span class="nl">public:</span>
+    <span class="c1">//explicit: no automatic conversions</span>
+    <span class="k">explicit</span> <span class="n">MemoryHandler</span><span class="p">(</span><span class="n">T</span><span class="o">*</span> <span class="n">ptr</span><span class="p">)</span> <span class="o">:</span> <span class="n">ptr_</span><span class="p">(</span><span class="n">ptr</span><span class="p">)</span> <span class="p">{}</span>
+    <span class="n">T</span><span class="o">*</span> <span class="n">ptr</span><span class="p">()</span> <span class="p">{</span> <span class="k">return</span> <span class="n">ptr_</span><span class="p">;</span> <span class="p">}</span>
+    <span class="o">~</span><span class="n">MemoryHandler</span><span class="p">()</span> <span class="p">{</span> <span class="k">delete</span> <span class="n">ptr_</span><span class="p">;</span> <span class="p">}</span>
+<span class="nl">private:</span>
+    <span class="n">T</span><span class="o">*</span> <span class="n">ptr_</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p>This class can already be used to perform simple scope-based resource
+management: the resource is deleted when the handler goes out of scope.</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">PrintCppStd</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="n">Printer</span> <span class="o">&gt;</span> <span class="n">mh</span><span class="p">(</span><span class="k">new</span> <span class="n">Printer</span><span class="p">(</span><span class="s">"remote printer 1"</span><span class="p">));</span>
+    <span class="n">Printer</span><span class="o">*</span> <span class="n">p</span> <span class="o">=</span> <span class="n">mh</span><span class="p">.</span><span class="n">ptr</span><span class="p">();</span>
+    <span class="n">p</span><span class="o">-&gt;</span><span class="n">Print</span><span class="p">(</span><span class="s">"./ISO_IEC_14882-2011.pdf"</span><span class="p">);</span>
+<span class="p">}</span> <span class="c1">//resource automatically destroyed by MemoryHandler destructor upon exit</span>
+</code></pre></div></div>
+
+<p>The resource is destroyed by the Printer destructor when the instance goes out
+of scope, this means that there must be only a single instance of <code class="highlighter-rouge">MemoryHandler</code>
+pointing to the <code class="highlighter-rouge">Printer</code> instance, if multiple instances of <code class="highlighter-rouge">MemoryHandler</code>
+pointing to the same <code class="highlighter-rouge">Printer</code> instance exist they will all try to delete the
+same resource resulting in a run-time error when the destructors get invoked.</p>
+
+<p>In order to enforce the single ownership requirement we need to transfer the
+ownership, i.e. the responsibility to manage the resource lifetime, from one
+object to another upon construction and copy operations.</p>
+
+<p>The object owning a valid resource handle is the one that shall dispose the
+resource when its destructor is invoked.</p>
+
+<p>To implement ownership transfer we can start by adding a copy constructor and
+assignment operator accepting a non-constant reference to another reference
+handler which copies the pointer and resets the pointer in the source object:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">MemoryHandler</span><span class="p">(</span><span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="n">mh</span><span class="p">)</span> <span class="o">:</span> <span class="n">ptr_</span><span class="p">(</span><span class="n">mh</span><span class="p">.</span><span class="n">ptr_</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">mh</span><span class="p">.</span><span class="n">ptr_</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>A copy constructor accepting a non-constant reference can however only be used
+to copy from non-temporary objects and will not work with objects returned from
+functions.</p>
+
+<h2 id="ownership-transfer">Ownership transfer</h2>
+
+<p>In order to have ownership transfer work with temporary
+source objects we need to implement a proper copy constructor and assignment
+operator.</p>
+
+<p>Note that assignment and construction must not only copy the resource pointer
+but also notify the source object that it has lost ownership of the resource
+and must not try to dispose it.</p>
+
+<p>One way to notify the source object of lost ownership is to simply reset its
+inner <code class="highlighter-rouge">ptr_</code> resource handle to an empty or invalid value, i.e. to <code class="highlighter-rouge">0</code> or 
+<code class="highlighter-rouge">nullptr</code> in the case of a memory pointer.</p>
+
+<p>The copy constructor accepting a non-constant reference is useful to prevent
+moving constant resource handlers but we also need to have a constructor that
+allows to construct a new object from a temporary object.</p>
+
+<h2 id="move-semantics">Move semantics</h2>
+
+<p>Move semantics refers to the act of moving the content of an
+object into another object without performing explicit copies.</p>
+
+<p>Move semantics is in fact implemented in terms of ownership transfer as a copy
+and reset operation applied to resource handles.</p>
+
+<p>A typical case where move semantics is useful is copying from a temporary
+object (e.g. returned from a function) that contains a heap allocated pointer
+as a member variable: since the allocated memory is going to be released after
+the copy, instead of performing allocate-copy-free operations it is much faster
+to simply copy the pointer into the new object and reset the pointer of the
+temporary source object to <code class="highlighter-rouge">nullptr</code> so that memory is not released when the
+temporary object goes out of scope.</p>
+
+<p>A typical case where move semantics is required is storing resource handlers
+requiring single ownership (e.g. sockets or C++ 11 threads) into standard
+library containers.</p>
+
+<p>When adding an element to e.g. an <code class="highlighter-rouge">std::vector</code> the element has to have its
+internal handle moved to the object stored into the container.</p>
+
+<p>Note however that it might not be a good idea to store resource handlers into
+containers unless you are 100% sure that no additional hidden copies happen
+internally during the common container operations.</p>
+
+<p>It might indeed be a better idea to store the actual resource handles in the
+container and have the resource handler wrap a heap allocated container filled
+with handles.</p>
+
+<h2 id="adding-move-semantics">Adding move semantics</h2>
+
+<p>The current MemoryHandler implementation can only be used to perform
+scope-based automatic resource management.</p>
+
+<p>To fully support move semantics we need:</p>
+
+<p>a move constructor to move data from temporary objects (e.g. returned from
+functions) into a newly constructed object an assignment operator that can move
+resource handles from the r-value to the l-value instance One way of supporting
+construction and assignment from temporary objects is to create a new type that
+wraps the inner resource handle and add a conversion operator and move
+constructor accepting instances of this new type.</p>
+
+<p>The copy-through-proxy and reset technique is known as the Colvin and Gibbons
+trick.</p>
+
+<p><img src="/assets/images/cg-trick.png" alt="image" title="Colvin-Gibbons trick" /></p>
+
+<p>The Proxy type is implemented as an inner class, no need for visibility from
+the outside:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span> <span class="k">class</span> <span class="nc">MemoryHandler</span> <span class="p">{</span>
+<span class="nl">private:</span>
+    <span class="k">struct</span> <span class="n">Proxy</span> <span class="p">{</span>
+        <span class="n">T</span><span class="o">*</span> <span class="n">ptr</span><span class="p">;</span>
+    <span class="p">};</span>
+<span class="p">...</span>
+</code></pre></div></div>
+
+<p>Conversion operator, constructor and assignment:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="k">operator</span> <span class="nf">Proxy</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">T</span><span class="o">*</span> <span class="n">ptr</span> <span class="o">=</span> <span class="n">ptr_</span><span class="p">;</span>
+        <span class="n">Proxy</span> <span class="n">p</span><span class="p">;</span>
+        <span class="n">p</span><span class="p">.</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">ptr</span><span class="p">;</span>
+        <span class="n">ptr_</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="c1">//memory handler has moved out: reset this-&gt;ptr_</span>
+        <span class="k">return</span> <span class="n">p</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">MemoryHandler</span><span class="p">(</span><span class="k">const</span> <span class="n">Proxy</span><span class="o">&amp;</span> <span class="n">p</span><span class="p">)</span> <span class="o">:</span> <span class="n">ptr_</span><span class="p">(</span><span class="n">p</span><span class="p">.</span><span class="n">ptr</span><span class="p">)</span> <span class="p">{}</span>
+    
+    <span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="k">operator</span><span class="o">=</span><span class="p">(</span><span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="n">mh</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">MemoryHandler</span><span class="p">(</span><span class="n">mh</span><span class="p">).</span><span class="n">Swap</span><span class="p">(</span><span class="o">*</span><span class="k">this</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">*</span><span class="k">this</span><span class="p">;</span>
+    <span class="p">}</span>
+
+<span class="k">private</span><span class="o">:</span> <span class="c1">//helper swap method</span>
+    <span class="kt">void</span> <span class="nf">Swap</span><span class="p">(</span><span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="n">mh</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">(</span><span class="n">mh</span><span class="p">.</span><span class="n">ptr_</span><span class="p">,</span> <span class="n">ptr_</span><span class="p">);</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="limitations">Limitations</h2>
+
+<p>As it stands we have a class that:</p>
+
+<ul>
+  <li>
+    <p>properly manages the lifetime of a memory buffer identified by a memory handle
+(pointer)</p>
+  </li>
+  <li>
+    <p>supports construction and assignment from non-const and temporary
+objects</p>
+  </li>
+  <li>
+    <p>prevents constant objects from being moved</p>
+  </li>
+</ul>
+
+<p>Now let’s see what happens if you try to store an instance of <code class="highlighter-rouge">MemoryHandler</code>
+into a standard container such as <code class="highlighter-rouge">std::vector</code>:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span> <span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="kt">int</span> <span class="o">&gt;</span> <span class="o">&gt;</span> <span class="n">mhandlers1</span><span class="p">;</span>
+<span class="n">mhandlers1</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="kt">int</span> <span class="o">&gt;</span><span class="p">(</span><span class="k">new</span> <span class="nf">int</span><span class="p">(</span><span class="mi">1</span><span class="p">)));</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span> <span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="kt">int</span> <span class="o">&gt;</span> <span class="o">&gt;</span> <span class="n">mhandlers2</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="kt">int</span> <span class="o">&gt;</span> <span class="n">mh</span><span class="p">(</span><span class="k">new</span> <span class="nf">int</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+<span class="n">mhandlers2</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">mh</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p>When compiling with clang++ the first reported error is:</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>error: no matching constructor for initialization of 'MemoryHandler'
+{ ::new(__p) _Tp(__val); }
+^ ~~~~~
+</code></pre></div></div>
+
+<p>this is because there is no copy constructor available which accepts a constant
+reference.</p>
+
+<p>Alternative ways to implement move semantics do exist e.g. add a mutable guard
+data member that is set to false when the object loses ownership of the
+resource handle and avoids destroying the resource if the object does not own
+it. The problem with this approach is that it allows to move any const object
+preventing the implementation of e.g. the 
+<a href="http://www.gotw.ca/publications/using_auto_ptr_effectively.htm">safe <code class="highlighter-rouge">auto_ptr</code> idiom</a></p>
+
+<h2 id="move-semantics-and-standard-containers">Move semantics and standard containers</h2>
+
+<p>In cases where all the objects in the container must be destroyed together at
+the same time, instead of storing resource handlers as elements in standard
+containers you can simply wrap a container instance with a resource handler
+store the actual resource handle (e.g. a memory pointer) inside the container
+the handler’s destructor will take care of iterating over the container and
+release every resource one by one.</p>
+
+<p>In cases where resource handlers can be inserted and removed into/from the
+container: use the approach described above and</p>
+
+<p>wrap elements with resource handlers when removed from the container extract
+resource handles from handlers when adding resources to the container The only
+addition to the MemoryHandler class required to make this strategy work is a
+release() method which resets the internal pointer to 0 and returns the
+previously stored pointer.</p>
+
+<p>The code to manage a set of handles within a container then looks like:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">//create a handler wrapping a heap allocated standard container</span>
+<span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span> <span class="kt">int</span><span class="o">*</span> <span class="o">&gt;</span> <span class="o">&gt;</span> <span class="n">handler</span><span class="p">(</span><span class="k">new</span> <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span> <span class="kt">int</span><span class="o">*</span> <span class="o">&gt;</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">*&gt;&amp;</span> <span class="n">handles</span> <span class="o">=</span> <span class="o">*</span><span class="n">handler</span><span class="p">.</span><span class="n">ptr</span><span class="p">();</span>
+<span class="n">MemoryHandler</span> <span class="nf">mhIn</span><span class="p">(</span><span class="n">CreateHandler</span><span class="p">(...));</span>
+<span class="p">....</span>
+<span class="c1">//store the pointer into the collection and set the internal pointer</span>
+<span class="c1">//to zero inside the memory handler</span>
+<span class="n">handles</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">mhIn</span><span class="p">.</span><span class="n">release</span><span class="p">());</span>
+<span class="p">...</span>
+<span class="c1">//extract a pointer from the container; will not reset the pointer</span>
+<span class="c1">//inside the container, so you end up with two pointers referencing</span>
+<span class="c1">//the same memory location</span>
+<span class="n">MemoryHandler</span> <span class="nf">mhOut</span><span class="p">(</span><span class="n">handles</span><span class="p">.</span><span class="n">front</span><span class="p">());</span>
+<span class="c1">//manually reset the pointer in the container:</span>
+<span class="n">handles</span><span class="p">.</span><span class="n">front</span><span class="p">()</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="c1">//moved; need to do this automatically</span>
+</code></pre></div></div>
+
+<p>To perform the resource extraction and automatically reset the source handle in
+one call you can use a simple release function:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span> <span class="o">&lt;</span> <span class="k">typename</span> <span class="n">T</span> <span class="o">&gt;</span>
+<span class="n">T</span><span class="o">*</span> <span class="nf">release</span><span class="p">(</span><span class="n">T</span><span class="o">*&amp;</span> <span class="n">rh</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">T</span><span class="o">*</span> <span class="n">ret</span> <span class="o">=</span> <span class="n">rh</span><span class="p">;</span>
+    <span class="n">rh</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">ret</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>The code to perform the actual resource extraction and reset then becomes:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="kt">int</span> <span class="o">&gt;</span> <span class="n">mhOut</span><span class="p">(</span><span class="n">reset</span><span class="p">(</span><span class="n">handles</span><span class="p">.</span><span class="n">front</span><span class="p">()));</span>
+</code></pre></div></div>
+
+<p>without the need to explicitly set the std::vector element to zero.</p>
+
+<p>Whether you decide to physically remove the element from the vector or not it is
+not a problem since it will not cause any error upon destruction of the
+container.</p>
+
+<h2 id="c-11">C++ 11</h2>
+<p>If you can use a C++ 11 conformant-enough compiler such as:</p>
+
+<ul>
+  <li>gcc &gt;= 4.8</li>
+  <li>clang llvm &gt;= 3.2</li>
+  <li>Intel icc &gt;= 14.0</li>
+  <li>PGI &gt;= 13.1</li>
+  <li>Microsoft VS &gt;= 2012</li>
+</ul>
+
+<p>you can avoid tricks and hacks and simply use r-value references to perform the
+move.</p>
+
+<p>Here is the same <code class="highlighter-rouge">MemoryHandler</code> class implemented with r-value references and
+calls to <code class="highlighter-rouge">std::move</code> when needed.</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span> <span class="o">&lt;</span> <span class="k">typename</span> <span class="n">T</span> <span class="o">&gt;</span>
+<span class="k">class</span> <span class="nc">MemoryHandler</span> <span class="p">{</span>
+<span class="nl">private:</span>
+    <span class="k">struct</span> <span class="n">Proxy</span> <span class="p">{</span>
+        <span class="n">T</span><span class="o">*</span> <span class="n">ptr</span><span class="p">;</span>
+    <span class="p">};</span>
+<span class="nl">public:</span>
+    <span class="n">MemoryHandler</span><span class="p">(</span><span class="n">MemoryHandler</span><span class="o">&amp;&amp;</span> <span class="n">mh</span><span class="p">)</span> <span class="o">:</span> <span class="n">ptr_</span><span class="p">(</span><span class="n">mh</span><span class="p">.</span><span class="n">ptr_</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">mh</span><span class="p">.</span><span class="n">ptr_</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">MemoryHandler</span><span class="p">(</span><span class="k">const</span> <span class="n">MemoryHandler</span><span class="o">&amp;</span><span class="p">)</span> <span class="o">=</span> <span class="k">delete</span><span class="p">;</span>
+    <span class="k">explicit</span> <span class="n">MemoryHandler</span><span class="p">(</span><span class="n">T</span><span class="o">*</span> <span class="n">ptr</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">:</span> <span class="n">ptr_</span><span class="p">(</span><span class="n">ptr</span><span class="p">)</span> <span class="p">{}</span>
+    <span class="n">T</span><span class="o">*</span> <span class="n">ptr</span><span class="p">()</span> <span class="p">{</span> <span class="k">return</span> <span class="n">ptr_</span><span class="p">;</span> <span class="p">}</span>
+    <span class="o">~</span><span class="n">MemoryHandler</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">delete</span> <span class="n">ptr_</span><span class="p">;</span> <span class="c1">//it is fine to call 'delete 0'</span>
+    <span class="p">}</span>
+    <span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="k">operator</span><span class="o">=</span><span class="p">(</span><span class="n">MemoryHandler</span><span class="o">&amp;&amp;</span> <span class="n">mh</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">MemoryHandler</span><span class="p">(</span><span class="n">mh</span><span class="p">).</span><span class="n">Swap</span><span class="p">(</span><span class="o">*</span><span class="k">this</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">*</span><span class="k">this</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="k">operator</span><span class="o">=</span><span class="p">(</span><span class="k">const</span> <span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="n">mh</span><span class="p">)</span> <span class="o">=</span> <span class="k">delete</span><span class="p">;</span>
+<span class="nl">private:</span>
+    <span class="kt">void</span> <span class="n">Swap</span><span class="p">(</span><span class="n">MemoryHandler</span><span class="o">&amp;</span> <span class="n">mh</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">(</span><span class="n">mh</span><span class="p">.</span><span class="n">ptr_</span><span class="p">,</span> <span class="n">ptr_</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="nl">private:</span>
+    <span class="n">T</span><span class="o">*</span> <span class="n">ptr_</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p>If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you
+will need to use the various strategies outlined in the previous sections for
+the foreseeable future.</p>
+
+<p>One more thing…</p>
+
+<p>Automatic resource management techniques can be applied to types other than
+memory pointers, in my case I use sockets (regular and zmq), threads, OpenCL
+memory objects, CUDA and OpenGL resources; it is however always possible to
+use versions of the <code class="highlighter-rouge">MemoryHandler</code> implemented in this article by simply
+wrapping the resource handles with a heap allocated instance of a wrapper
+class. e.g.</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">Socket</span> <span class="p">{</span>
+<span class="nl">public:</span>
+    <span class="n">Socket</span><span class="p">(</span><span class="kt">int</span> <span class="n">s</span><span class="p">)</span> <span class="o">:</span> <span class="n">socket_</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="p">{}</span>
+    <span class="kt">int</span> <span class="n">get</span><span class="p">()</span> <span class="p">{</span> <span class="k">return</span> <span class="n">socket_</span><span class="p">;</span> <span class="p">}</span>
+    <span class="o">~</span><span class="n">Socket</span><span class="p">()</span> <span class="p">{</span> <span class="n">close</span><span class="p">(</span><span class="n">socket_</span><span class="p">);</span> <span class="p">}</span>
+<span class="nl">private:</span>
+    <span class="kt">int</span> <span class="n">socket_</span><span class="p">;</span>
+<span class="p">};</span>
+<span class="p">...</span>
+<span class="n">MemoryHandler</span><span class="o">&lt;</span> <span class="n">Socket</span> <span class="o">&gt;</span>
+<span class="n">sh</span><span class="p">(</span><span class="k">new</span> <span class="nf">Socket</span><span class="p">(</span><span class="n">socket</span><span class="p">(</span><span class="n">AF_INET</span><span class="p">,</span> <span class="n">SOCK_STREAM</span><span class="p">,</span> <span class="n">IPPROTO_TCP</span><span class="p">)));</span>
+<span class="kt">int</span> <span class="n">aSocket</span> <span class="o">=</span> <span class="n">sh</span><span class="p">.</span><span class="n">ptr</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">get</span><span class="p">();</span>
+</code></pre></div></div>
+
+<p>If you want to avoid memory management operations you can always define a
+generic Handler class using policy based design, you’ll need policies for:</p>
+
+<p>validation: to detect if a resource can be safely disposed setting an
+empty/invalid value: to signal the wapper object it has lost ownership of the
+resource and must not try to dispose it releasing the resource: to dispose the
+resoure upon destruction of the resource handler instance Note that you usually
+do need an implementation of policy-based design or strategy pattern to properly
+dipose the resource through a release function provided by client code to the
+handler class; one example is the case of arrays: a <code class="highlighter-rouge">delete []</code> operator has to be
+invoked instead of delete.</p>
+
+<p>A reworked version of the MemoryHandler class is shown below (C++11 version
+only).</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span> <span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="p">,</span>
+          <span class="k">typename</span> <span class="n">ValidationPolicy</span><span class="p">,</span>
+          <span class="k">typename</span> <span class="n">ResetPolicy</span><span class="p">,</span>
+          <span class="k">typename</span> <span class="n">ReleasePolicy</span><span class="o">&gt;</span>
+<span class="k">class</span> <span class="nc">Handler</span> <span class="p">{</span>
+<span class="nl">public:</span>
+    <span class="n">Handler</span><span class="p">(</span><span class="n">Handler</span><span class="o">&amp;&amp;</span> <span class="n">h</span><span class="p">)</span> <span class="o">:</span> <span class="n">res_</span><span class="p">(</span><span class="n">h</span><span class="p">.</span><span class="n">res_</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ReleasePolicy</span><span class="o">::</span><span class="n">Reset</span><span class="p">(</span><span class="n">h</span><span class="p">.</span><span class="n">res_</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="n">Handler</span><span class="p">(</span><span class="k">const</span> <span class="n">Handler</span><span class="o">&amp;</span><span class="p">)</span> <span class="o">=</span> <span class="k">delete</span><span class="p">;</span>
+    <span class="k">explicit</span> <span class="n">Handler</span><span class="p">(</span><span class="n">T</span> <span class="n">res</span> <span class="o">=</span> <span class="n">T</span><span class="p">())</span> <span class="o">:</span> <span class="n">res_</span><span class="p">(</span><span class="n">res</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ReleasePolicy</span><span class="o">::</span><span class="n">Reset</span><span class="p">(</span><span class="n">res_</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="n">T</span><span class="o">&amp;</span> <span class="n">get</span><span class="p">()</span> <span class="p">{</span> <span class="k">return</span> <span class="n">res_</span><span class="p">;</span> <span class="p">}</span>
+    <span class="k">const</span> <span class="n">T</span><span class="o">&amp;</span> <span class="n">get</span><span class="p">()</span> <span class="k">const</span> <span class="p">{</span> <span class="k">return</span> <span class="n">res_</span><span class="p">;</span> <span class="p">}</span>
+    <span class="o">~</span><span class="n">Handler</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span><span class="p">(</span><span class="n">ValidationPolicy</span><span class="o">::</span><span class="n">Valid</span><span class="p">(</span><span class="n">res_</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">ReleasePolicy</span><span class="o">::</span><span class="n">Release</span><span class="p">(</span><span class="n">res_</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="c1">//Handler(Handler&amp;&amp;) automatically invoked if needed</span>
+    <span class="n">Handler</span><span class="o">&amp;</span> <span class="k">operator</span><span class="o">=</span><span class="p">(</span><span class="n">Handler</span> <span class="n">h</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">h</span><span class="p">.</span><span class="n">Swap</span><span class="p">(</span><span class="o">*</span><span class="k">this</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">*</span><span class="k">this</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">Handler</span><span class="o">&amp;</span> <span class="k">operator</span><span class="o">=</span><span class="p">(</span><span class="k">const</span> <span class="n">Handler</span><span class="o">&amp;</span><span class="p">)</span> <span class="o">=</span> <span class="k">delete</span><span class="p">;</span>
+<span class="nl">private:</span>
+    <span class="kt">void</span> <span class="n">Swap</span><span class="p">(</span><span class="n">Handler</span><span class="o">&amp;</span> <span class="n">h</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">(</span><span class="n">h</span><span class="p">.</span><span class="n">res_</span><span class="p">,</span> <span class="n">res_</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="nl">private:</span>
+    <span class="n">T</span> <span class="n">res_</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p>C++11 standard collections do support move semantics out of the box through
+r-value references, it is therefore possible to move objects into collections
+through the <code class="highlighter-rouge">std::move</code> function.</p>
+
+<h2 id="code">Code</h2>
+
+<p><a href="https://github.com/ugovaretto/cpp11-scratch/blob/master/training/res-handler-1.cpp">Sample code is available on GitHub</a>.</p>
+
+:ET

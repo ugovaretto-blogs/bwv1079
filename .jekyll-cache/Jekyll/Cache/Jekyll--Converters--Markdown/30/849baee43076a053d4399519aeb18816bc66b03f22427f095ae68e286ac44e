@@ -1,4 +1,4 @@
-I"¼‰<h1 id="resource-handling-and-move-semantics">Resource handling and move semantics</h1>
+I"Ä‰<h1 id="resource-handling-and-move-semantics">Resource handling and move semantics</h1>
 
 <p>Techniques to automatically manage the run-time lifetime of resources include 
 reference counting, where multiple references to the same resource exist, and 
@@ -166,7 +166,7 @@ constructor accepting instances of this new type.</p>
 <p>The copy-through-proxy and reset technique is known as the Colvin and Gibbons
 trick.</p>
 
-<p><img src="/assets/images/cg-trick.png" alt="image" title="Colvin-Gibbons trick" /></p>
+<p><img src="/bwv1079/assets/images/cg-trick.png" alt="image" title="Colvin-Gibbons trick" /></p>
 
 <p>The Proxy type is implemented as an inner class, no need for visibility from
 the outside:</p>

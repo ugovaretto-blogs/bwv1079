@@ -162,7 +162,7 @@ constructor accepting instances of this new type.
 The copy-through-proxy and reset technique is known as the Colvin and Gibbons
 trick.
 
-![image]({{site.baserul}}/assets/images/cg-trick.png "Colvin-Gibbons trick")
+![image]({{site.baseurl}}/assets/images/cg-trick.png "Colvin-Gibbons trick")
 
 The Proxy type is implemented as an inner class, no need for visibility from
 the outside:

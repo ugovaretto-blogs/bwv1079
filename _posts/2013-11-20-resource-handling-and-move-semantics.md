@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Resource handling and move semantics
-categories: C++ C++11
+categories: [C++, C++11, Move semantics]
 permalink: /resource-handling-and-move-semantics/
 ---
 

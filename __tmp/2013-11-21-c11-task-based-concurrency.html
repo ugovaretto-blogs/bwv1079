@@ -1,0 +1,196 @@
+---
+layout: post
+title: C++11 & task based concurrency - part 2
+date: 2013-11-21 08:19:04.000000000 +08:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- C++
+- c++11
+- Concurrency
+tags:
+- c++
+- concurrency
+- future
+- multithreading
+- promise
+meta:
+  _edit_last: '58138826'
+  _publicize_pending: '1'
+author:
+  login: ugovaretto
+  email: ugovaretto@gmail.com
+  display_name: ugovaretto
+  first_name: ''
+  last_name: ''
+permalink: "/2013/11/21/c11-task-based-concurrency/"
+---
+<p>As mentioned in the <a title="previous" href="http://bwv1079.wordpress.com/2013/11/20/c11-task-based-concurrency-part-1">previous</a> post C++11 does not offer an out-of-the-box implementation of task based concurrency but only the option to schedule threads for execution.</p>
+<p>This post shows a simple but functional implementation of a task based executor using <em>C++11</em> facilities such as threads and futures.</p>
+<p>The way I would like to use a task-based executor is something like:</p>
+<p>[code language="cpp" light="true"]<br />
+const int NUMBER_OF_OS_THREADS = 2;<br />
+try {<br />
+  Executor exec(NUMBER_OF_OS_THREADS);<br />
+  auto f1 = exec([](){...});<br />
+  auto f2 = exec(sum, 1, 10, 1);<br />
+  auto f3 = exec(...);<br />
+  auto f4 = exec(...);<br />
+...<br />
+  f1.wait();<br />
+  int s = f2.get();<br />
+...<br />
+} catch(const std::exception&amp; e) {<br />
+  std::cerr &lt;&lt; e.what() &lt;&lt; std::endl;<br />
+}<br />
+[/code]</p>
+<p>The number of OS threads is set to two meaning that at any given time no more than two OS threads are active.</p>
+<p>The number of tasks can be anything but at most two tasks are executed concurrently.</p>
+<h2>Requirements</h2>
+<p>To implement an <code>Executor</code> object that supports the desired functionality we need to:</p>
+<ol>
+<li>create OS threads once when the `Executor` instance is created and reuse<br />
+them later to invoke the callable objects</li>
+<li>store the callable object together with its parameters for deferred<br />
+execution</li>
+<li>implement an `operator ()(...)` that accepts a callable object and any number of<br />
+parameters of any type which are passed to the callable object when invoked</li>
+<li>forward exceptions from the OS threads to the parent thread (creator of<br />
+`Executor` instance)</li>
+<li>find a way to stop execution</li>
+</ol>
+<h2>Implementation</h2>
+<p>Let's go through the requirements</p>
+<h3>1. - create threads once and reuse when needed</h3>
+<p><code>std::threads</code> shall be created when the *Executor* object is created and put<br />
+in a wait state by waiting for callable objects to be added to a shared queue.</p>
+<p>Futures and promises are used to push results to the parent thread.</p>
+<p>A thread shall:</p>
+<ol>
+<li>pop a callable object from the shared queue or wait if none available</li>
+<li>execute the callable object,  and go back to (1)</li>
+</ol>
+<p>E.g.</p>
+<p>[code lang="cpp" light="true"]<br />
+for(int t = 0; t != nthreads_; ++t) {<br />
+  threads_.push_back(std::move(std::thread( [this] {<br />
+    while(true) {<br />
+      ICaller* c = queue_.Pop();<br />
+      if(c-&gt;Empty()) { //interpret an empty Caller as a<br />
+                     //'terminate' message<br />
+        break;<br />
+      }<br />
+      c-&gt;Invoke();<br />
+      delete c;<br />
+    }<br />
+  })));<br />
+}<br />
+[/code]</p>
+<p>The code also shows how <em>empty</em> tasks are used to signal a termination request.</p>
+<h3>2. and 3. - create task for deferred execution</h3>
+<p><code>operator ()(...)</code> shall accept a callable object and any number of parameters<br />
+through a variadic template list.</p>
+<p><code>operator ()(...)</code> shall return a future which client code can use to wait for results to be computed.</p>
+<p>The actual implementation of <code>operator ()(...)</code> shall package the callable object together with the call parameters into a single object to be stored into an execution queue shared by all OS threads.</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt; typename F, typename... Args &gt;<br />
+auto operator()(F&amp;&amp; f, Args... args)<br />
+-&gt; std::future&lt; typename std::result_of&lt; F (Args...) &gt;::type &gt; {<br />
+    if(threads_.empty()) throw std::logic_error(&quot;No active threads&quot;);<br />
+    typedef typename std::result_of&lt; F (Args...) &gt;::type ResultType;<br />
+    Caller&lt; ResultType &gt;* c =<br />
+    new Caller&lt; ResultType &gt;(std::forward&lt; F &gt;(f),<br />
+                             std::forward&lt; Args &gt;(args)...);<br />
+    std::future&lt; ResultType &gt; ft = c-&gt;GetFuture();<br />
+    queue_.Push(c);<br />
+    return ft;<br />
+}<br />
+[/code]</p>
+<p>Since all the objects in the shared queue have to be of the same type, we must define an abstract base class then add to the queue instances of derived concrete classes which store the actual callable object and parameters.</p>
+<p>The full implementation for a *callable* class is shown below. `void`specialization not shown.</p>
+<p>[code lang="cpp" light="true"]<br />
+//interface and base class for callable objects<br />
+struct ICaller {<br />
+    virtual bool Empty() const = 0;<br />
+    virtual void Invoke() = 0;<br />
+    virtual ~ICaller() {}<br />
+};</p>
+<p>//callable object stored in queue shared among threads: parameters are<br />
+//bound at object construction time<br />
+template &lt; typename ResultType &gt;<br />
+class Caller : public ICaller {<br />
+public:<br />
+    template &lt; typename F, typename... Args &gt;<br />
+    Caller(F&amp;&amp; f, Args...args) :<br />
+        f_(std::bind(std::forward(f),<br />
+                     std::forward(args)...)),<br />
+        empty_(false) {}<br />
+    Caller() : empty_(true) {}<br />
+    std::future&lt; ResultType &gt; GetFuture() {<br />
+        return p_.get_future();<br />
+    }<br />
+    void Invoke() {<br />
+        try {<br />
+            ResultType r = ResultType(f_());<br />
+            p_.set_value(r);<br />
+        } catch(...) {<br />
+            p_.set_exception(std::current_exception());<br />
+        }<br />
+    }<br />
+    bool Empty() const { return empty_; }<br />
+private:<br />
+    std::promise&lt; ResultType &gt; p_;<br />
+    std::function&lt; ResultType () &gt; f_;<br />
+    bool empty_;<br />
+};<br />
+[/code]</p>
+<h3>Forward exceptions</h3>
+<p>Threads shall execute the callable objects inside a `try/catch` block and in case an exception occurs they shall forward the exception to the parent thread through <code>promise::set_exception</code>.</p>
+<h3>5. Stop execution</h3>
+<p>One way to stop execution is to add one empty callable object per thread: when a thread pops a task from the queue and that task is marked as `empty`the thread exits from the loop.</p>
+<h3>The shared queue</h3>
+<p>A key part of the *Executor* implementation is the shared queue accessed by all OS threads.</p>
+<p>The queue must use a synchronization mechanism to serialize access to its element to allow only a single thread at a time to push or pop data.</p>
+<p>The <em>push</em> method locks the queue and adds an element.</p>
+<p>The <em>pop</em> method locks the queue then checks if the queue is empty, if it is, it unlocks the queue and waits for elements to be added. These operations are executed as a unique atomic operation through the `std::wait` function.</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt; typename T &gt;<br />
+class SyncQueue {<br />
+public:<br />
+    void Push(const T&amp; e) {<br />
+        std::lock_guard&lt; std::mutex &gt; guard(mutex_);<br />
+        queue_.push_front(e);<br />
+        cond_.notify_one(); //notify<br />
+    }<br />
+    T Pop() {<br />
+        std::unique_lock&lt; std::mutex &gt; lock(mutex_);<br />
+        //stop and wait for notification if condition is false;<br />
+        //continue otherwise<br />
+        cond_.wait(lock, [this]{ return !queue_.empty();});<br />
+        T e = queue_.back();<br />
+        queue_.pop_back();<br />
+        return e;<br />
+    }<br />
+    friend class Executor; //to allow calls to Clear<br />
+private:<br />
+    void Clear() { queue_.clear(); }<br />
+private:<br />
+    std::deque&lt; T &gt; queue_;<br />
+    std::mutex mutex_;<br />
+    std::condition_variable cond_;<br />
+};<br />
+[/code]</p>
+<p>Since the <code>SyncQueue</code> class is only used by <code>Executor</code> it might be a good idea to make it a private inner class of <code>Executor</code> itself.</p>
+<h3>Code</h3>
+<p>A sample implementation of an <code>Executor</code> class with comments and sample usage is <a title="available on GitHub" href="https://github.com/ugovaretto/cpp11-scratch/blob/master/training/task-based-executor.cpp">available on GithHub</a>.</p>
+<h2>Going further</h2>
+<p>If you want to play with the code and extend it you might consider:</p>
+<ul>
+<li>implementing a <code>Pause</code> method to pause (not stop) and resume execution</li>
+<li>specify task dependencies through e.g. an overloaded operator that also accepts<br />
+a <code>future</code> or <code>shared_future</code> returned by another task</li>
+<li>task priorities: use a priority queue or multiple queues</li>
+</ul>

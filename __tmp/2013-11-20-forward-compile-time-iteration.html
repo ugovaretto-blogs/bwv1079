@@ -1,0 +1,138 @@
+---
+layout: post
+title: Forward compile-time iteration
+date: 2013-11-20 14:08:02.000000000 +08:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- C++
+- Templates
+tags:
+- c++
+- c++11
+- template metaprogramming
+- templates
+meta:
+  _edit_last: '58138826'
+  _publicize_job_id: '33711070450'
+author:
+  login: ugovaretto
+  email: ugovaretto@gmail.com
+  display_name: ugovaretto
+  first_name: ''
+  last_name: ''
+permalink: "/2013/11/20/forward-compile-time-iteration/"
+---
+<p>Just a word on compile-time iteration with templates after having seen too much code which for no good reason forces the iteration to always go backward and specialize with one or zero to signal the termination condition, which is especially bad in the case of e.g. a <a href="https://github.com/ugovaretto/cpp11-scratch/tree/master/training/tuple"><em>tuple</em></a> implementation where you end up with the types stored in the reverse order.</p>
+<h2>Backward iteration</h2>
+<p>Standard backward compile-time iteration goes like:</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt; int Counter,.... &gt;  //iteration step<br />
+struct Iterator {<br />
+  static void Do() {<br />
+    ...<br />
+    Iterator&lt; Counter - 1, ... &gt; ::Do()<br />
+  }<br />
+};</p>
+<p>template &lt; ... &gt;  //end iteration<br />
+struct Iterator&lt; 1, ... &gt;  {<br />
+  static void Do() {<br />
+    ...<br />
+  }<br />
+};<br />
+[/code]</p>
+<p>or with derivation:</p>
+<p>[code lang=&quot;cpp&quot; light=&quot;true&quot;]<br />
+template &lt; int Counter, .... &gt;<br />
+struct Iterable : Iterable&lt; Counter - 1, ... &gt;  {...};</p>
+<p>template &lt; ... &gt;  //end iteration<br />
+struct Iterable&lt; 0, ... &gt;  {...};<br />
+[/code]</p>
+<p>Apart from iterating backward you are also losing information about the actual iteration length in each step, this is easily fixed by adding an additional constant (i.e. all template specializations have the same value) template parameter holding the number of iteration steps.As an example of a compile-time backward iteration let&#039;s implement a function that prints a message a constant number of times:</p>
+<p>[code lang=&quot;cpp&quot; light=&quot;true&quot;]<br />
+#include &lt;iostream&gt; </p>
+<p>template &lt; int N &gt;<br />
+struct ReversePrinter {<br />
+    static void Print() {<br />
+        for(int t = 0; t != N - 1; ++t) std::cout &lt;&lt; &quot;  &quot;;<br />
+        std::cout &lt;&lt; &quot;Iteration &quot; &lt;&lt; N &lt;&lt; &#039;\n&#039;;<br />
+        ReversePrinter&lt; N - 1 &gt; ::Print();<br />
+    }<br />
+};</p>
+<p>template &lt;&gt;<br />
+struct ReversePrinter&lt; 1 &gt;  {<br />
+    static void Print() {<br />
+        std::cout &lt;&lt; &quot;Iteration 0&quot; &lt;&lt; std::endl;<br />
+    }<br />
+};</p>
+<p>int main(int, char**) {<br />
+    std::cout &lt;&lt; &quot;Standard reverse iterator:\n&quot;;<br />
+    ReversePrinter&lt; 3 &gt; ::Print();<br />
+    return 0;<br />
+}<br />
+[/code]</p>
+<p>If you compile and run the above code you get:</p>
+<pre>Standard reverse iterator:
+    Iteration 3
+  Iteration 2
+Iteration 1
+</pre>
+<p>Note that it is not possible to properly indent the output because there is no information about the number of steps so an additional template parameter has to be added e.g.</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt;  int N, ...., int NumIterations = N &gt;<br />
+[/code]<br />
+In order to keep the public interface intact it is also possible to create a helper class accepting both the counter and number of iterations and use it to perform the actual iteration.</p>
+<h2>Forward iteration</h2>
+<p>Forward iteration can easily be implemented with the following pattern:</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt;  int NumIterations, int Counter, ... &gt;<br />
+struct Iterator {<br />
+  static void Do() {<br />
+    ...<br />
+    Iterator&lt;  NumIterations, Counter + 1, ... &gt; ::Do()<br />
+  }<br />
+};</p>
+<p>template &lt;  ... &gt;  //end iteration<br />
+struct Iterator&lt;  NumIterations, NumIterations, ... &gt; {<br />
+  static void Do() {<br />
+    ...<br />
+  }<br />
+};<br />
+[/code]</p>
+<p>The trick hre is to use the amazing pattern matching capabilities of templates and specialize with <code>Counter == NumIterations</code> i.e. stopping the iteration when both <code>Counter</code> and <code>NumIterations</code> have the same value. With this approach the compile-time print algorithm is easily implemented as:</p>
+<p>[code lang="cpp" light="true"]<br />
+#include &lt; iostream&gt;</p>
+<p>template &lt;  int N, int Count = 1 &gt;<br />
+struct Printer {<br />
+    static void Print() {<br />
+        for(int t = 0; t != Count - 1; ++t) std::cout &lt; &lt;  "  ";<br />
+        std::cout &lt; &lt;  "Iteration " &lt; &lt;  Count &lt; &lt;  '\n';<br />
+        Printer&lt;  N, Count + 1 &gt; ::Print();<br />
+    }<br />
+};</p>
+<p>template &lt;  int N &gt;<br />
+struct Printer&lt;  N, N &gt;  {<br />
+    static void Print() {<br />
+        for(int t = 0; t != N - 1; ++t) std::cout &lt; &lt;  "  ";<br />
+        std::cout &lt; &lt;  "Iteration " &lt; &lt;  N &lt; &lt;  std::endl;<br />
+    }<br />
+};</p>
+<p>int main(int, char**) {<br />
+    std::cout &lt; &lt;  "Forward iterator:\n";<br />
+    Printer&lt;  3 &gt; ::Print();<br />
+    return 0;<br />
+}<br />
+[/code]</p>
+<p>which leads to the following output:</p>
+<pre>Forward iterator:
+Iteration 1
+  Iteration 2
+    Iteration 3</pre>
+<p>As you can see the iteration takes place in forward order.</p>
+<p>The <code>Counter</code> itself can be default initialized to one or we can use a helper class to leave the public interface untouched.</p>
+<h2>Resources</h2>
+<p><a href="https://github.com/ugovaretto/cpp11-scratch/blob/master/training/forward-template-iteration.cpp">Code</a><br />
+<a href="https://github.com/ugovaretto/cpp11-scratch/blob/master/training/tuple/tuple11.cpp">A recursive tuple implementation (C++11)</a></p>

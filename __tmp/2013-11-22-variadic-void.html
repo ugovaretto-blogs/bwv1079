@@ -1,0 +1,112 @@
+---
+layout: post
+title: Variadic templates and code maintainability
+date: 2013-11-22 12:38:47.000000000 +08:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- C++
+- c++11
+- Templates
+tags:
+- c++
+- templates
+- variadic templates
+meta:
+  _edit_last: '58138826'
+  _publicize_pending: '1'
+  _oembed_146d523cabdeb1ccff3812a96bb41c43: "{{unknown}}"
+  _oembed_d62ae6b0cbaab54a56051f4a879beb2b: "{{unknown}}"
+  _oembed_72030a6bea643828286e56247c08292c: "{{unknown}}"
+  _oembed_2778a0b4feb57477aef205b642393c3d: "{{unknown}}"
+  _oembed_14a3bd30f1db0cf3a3e00da71e0770e4: "{{unknown}}"
+  _oembed_f7228b02e23051b4dd52f71e7f7c4e13: "{{unknown}}"
+  _oembed_ee08c16035bed2c75d92e66c59567dc6: "{{unknown}}"
+  _oembed_0db81aa8339d2886e129cbc5266c302e: "{{unknown}}"
+  _oembed_fc0506192dae0f9d28bad350376b5a52: "{{unknown}}"
+  _oembed_186ef1a0e2ccb08cb1279ca7d219d8f4: "{{unknown}}"
+  _oembed_d07a72e4a11c41f9b9bec5d0453a0bba: "{{unknown}}"
+  _oembed_5561db006eb1a120c1f47cd9525561aa: "{{unknown}}"
+  _oembed_b09a3cf2f691c3fd4b948f03b70de493: "{{unknown}}"
+  _oembed_fe6f438629b30678313fb3c683c971d2: "{{unknown}}"
+  _oembed_4c5b5397af93577edeca971526db1924: "{{unknown}}"
+author:
+  login: ugovaretto
+  email: ugovaretto@gmail.com
+  display_name: ugovaretto
+  first_name: ''
+  last_name: ''
+permalink: "/2013/11/22/variadic-void/"
+---
+<p>This post was originally simply titled <em>Variadic void**</em> but since it shows how <em>C++11</em> does indeed help in making it easier to maintain legacy code I decided to change the title.</p>
+<h3>The problem</h3>
+<p>While developing a new framework for generating <em>CUDA</em> code through <em>Clang/LLVM</em> I restarted experimenting with  the <em>CUDA driver API</em> which now has an easier (as compared to &lt; <em>4.x</em> versions) way of launching kernels: one option is to pass parameters through an array of void pointers.</p>
+<p>Now, since in the past I created a <em>C++</em> library (<a title="gpupp" href="https://github.com/ugovaretto/gpupp">gpupp</a>) to simplify <em>OpenCL</em> and <em>CUDA</em> usage, I also wanted to update such library to work with the latest version of <em>OpenCL</em> and the <em>CUDA driver API</em>.</p>
+<p>When I first developed my little <em>gpupp</em> library variadic templates were not available so I resorted to type erasure through an <a title="Any" href="https://github.com/ugovaretto/gpupp/blob/master/utility/Any.h"><em>Any</em></a> type and parameters were passed to the kernel launcher function through a custom built <a href="https://github.com/ugovaretto/gpupp/blob/master/utility/varargs.h">varargs</a> type packing an array of <em>Any</em>.</p>
+<h3>The solution</h3>
+<p>It turns out that through the new <code>void**</code> interface and variadic templates offering a generic kernel launcher function is astonishingly easy.</p>
+<p>I am publishing here the code used to implement a <em>variadic list</em> → <em>void* array</em> conversion, note that the code allows the storing of references to temporary objects because the use case I need to support is something like:</p>
+<p>[code lang="cpp" light="true"]<br />
+template&lt; typename ArgTypes... &gt;<br />
+StatusCode Launch(dim3 blocks,<br />
+                  dim3 threads,<br />
+                  ArgTypes&amp;&amp;...argumentsPassedToGPUKernel) {<br />
+    void* args[...];<br />
+    //make args[] elements point to references to<br />
+    //argumentsPassedToGPUKernel elements<br />
+    ...<br />
+    return cuLaunchKernel(/*launch grid configuration...*/,<br />
+                          args,<br />
+                          nullptr);<br />
+}<br />
+[/code]</p>
+<p>All I need to do is to pass an array of pointers to references to a library function which does not need the referenced elements to be valid after it returns, so it is perfectly fine to create an argument array storing pointers to references to parameters passed to the <code>Launch</code> function even if some of the parameters are temporaries.</p>
+<p>It turns out that all you need to convert a variadic argument list to a <code>void*</code> array is this one line:</p>
+<p>[code lang="cpp" light="true"]<br />
+void* args[] = { &amp;args... };<br />
+[/code]</p>
+<p>This works if you do not pass in const references, if you do, you get an error from the compiler complaining that it cannot take the address of a reference and convert it to a <code>void</code> pointer.</p>
+<p>One easy fix is to just <em>C-cast</em> to <code>void*</code>.</p>
+<p>[code lang="cpp" light="true"]<br />
+void* args[] = { (void*) &amp;args... };<br />
+[/code]</p>
+<p><strong>Bam!</strong></p>
+<p>Now you can call the function like e.g.</p>
+<p>[code lang="cpp" light="true"]<br />
+double matrix[16];<br />
+const int iterations = 10;<br />
+Launch(...,<br />
+       ...,<br />
+       //templated arguments -&gt; template deduction context<br />
+       iterations, // T = const int &amp; -&gt; const int &amp; &amp;&amp; -&gt; const int &amp;<br />
+       0.2,        // T = double&amp;&amp; -&gt; double&amp;&amp;<br />
+       matrix      // T = double*&amp; -&gt; double*&amp; &amp;&amp; -&gt; double&amp;<br />
+      );<br />
+[/code]</p>
+<p>If you are not happy with the <em>C</em>-style <code>(void*)</code> conversion and you really, really want to use <em>C++</em> cast operators you can write something like:</p>
+<p>[code lang="cpp" light="true"]<br />
+void* args[] =<br />
+{const_cast&lt; void* &gt;(<br />
+   static_cast&lt; const void* &gt;(<br />
+   /*const_cast&lt; typename std::remove_reference&lt;Args&gt;::type* const&gt;(&amp;args)))...} OR*/<br />
+     (typename std::remove_reference&lt;Args&gt;::type* const)(&amp;args)))...};<br />
+   /*OR other combination involving the use of reinterpret_cast*/<br />
+[/code]</p>
+<p>i.e.: <code>T or T&amp; or const T&amp; → const T* → const void* → void*</code></p>
+<p>Feel free to go ahead and compare this solution with the dozens of lines of code I was forced to write in the past:</p>
+<ul>
+<li><code>SetupKernelParameters</code> function in <a href="https://github.com/ugovaretto/gpupp/blob/master/cuda/gpupp.cpp">gpupp.cpp</a></li>
+<li><code><a title="Any" href="https://github.com/ugovaretto/gpupp/blob/master/utility/Any.h">Any</a></code></li>
+<li><code><a href="https://github.com/ugovaretto/gpupp/blob/master/utility/varargs.h">VArgList</a></code></li>
+</ul>
+<p>I actually also had another problem at the time: parameters could not be just passed in as an array of void pointers but had to be manually added to a  stack also specifying a properly aligned offset at each step, but 90+% of the code I had to write was because variadic templates were not available!</p>
+<p>By the way: in the meantime I also realized that with <em>smart pointers</em> (with custom deleters) and <code>std::chrono</code> the entire utility directory in my <em>gpupp</em> library becomes useless.</p>
+<h3>Conclusion</h3>
+<p><strong>DO use <em>C++11</em></strong> and start getting acquainted with <em>rvalue references</em>, <em>auto</em>, <em>variadic templates</em>, <em>lambda functions</em>, <em>decltype</em> and the updated <em>STL</em> (but beware of the differences among implementations).</p>
+<p>You might find out that most of the code you have written can be rewritten in a handful of lines or simply replaced with library functions and types, this also includes some of the template metaprogramming, and macro code commonly implemented through the use of the <em>Boost</em> libraries.</p>
+<p>I also believe it is especially important to review old code you still need to maintain and port it to C++11 because by reducing the amount of lines of code and using STL features you'll make it easier to maintain and you might also fix some bugs in the process (this is what happended to me anyway).</p>
+<p>I personally find variadic templates the most effective device for simplifying legacy code both in the case of interfaces to <em>C</em> libraries accepting (or returning) arguments through arrays and when dealing with generic code that uses <code>boost::preprocessor</code> or multiple overloads/specializations to implement types and functions that accept a variable number of arguments.</p>
+<p>For an additional example of how variadic templates simplify code previously implemented with <em>C++98</em> do check <a href="https://github.com/ugovaretto/cpp11-scratch/tree/master/training/tuple">my different versions of a <code>tuple</code> implementation</a> and compare the <em>C++11</em> version with the others.</p>

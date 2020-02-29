@@ -7,25 +7,25 @@ permalink: /resource-handling-and-move-semantics/
 
 # Resource handling and move semantics
 
-Techniques to automatically manage the run-time lifetime of resources include 
-reference counting, where multiple references to the same resource exist, and 
-ownership transfer where only a single reference to a resource at any given 
-time does exist.
+Techniques to automatically manage the run-time lifetime of resources include
+reference counting, where multiple references to the same resource exist, and
+ownership transfer where only a single reference to a resource at any given time
+does exist.
 
-The two approaches result in a completely different set of implementation 
+The two approaches result in a completely different set of implementation
 challenges:
 
-* *Shared ownership*: reference cycles (two objects pointing at each other)
-   and serialized access to the reference counter and possibly the resource
-   itself (through e.g. overloading of the -> operator)
-* *Single ownership*: copy construction from a source object and reset of
-   the resource reference in the source object itself to avoid multiple 
-   destruction attempts
+* *Shared ownership*: reference cycles (two objects pointing at each other) and
+  serialized access to the reference counter and possibly the resource itself
+  (through e.g. overloading of the -> operator)
+* *Single ownership*: copy construction from a source object and reset of the
+  resource reference in the source object itself to avoid multiple destruction
+  attempts
 
-This post describes a possible implementation, in both C++98 and C++11 
-language standards, for a resource handler with ownership transfer
-similar to `auto_ptr/unique_ptr` to be used for resources such as file
-descriptors/streams, sockets and memory pointers.
+This post describes a possible implementation, in both C++98 and C++11 language
+standards, for a resource handler with ownership transfer similar to
+`auto_ptr/unique_ptr` to be used for resources such as file descriptors/streams,
+sockets and memory pointers.
 
 ### Glossary
 

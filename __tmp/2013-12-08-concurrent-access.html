@@ -1,0 +1,309 @@
+---
+layout: post
+title: Concurrent access
+date: 2013-12-08 15:46:54.000000000 +08:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- C++
+- c++11
+- Concurrency
+tags:
+- c++
+- concurrency
+- threads
+meta:
+  _edit_last: '58138826'
+  _publicize_pending: '1'
+author:
+  login: ugovaretto
+  email: ugovaretto@gmail.com
+  display_name: ugovaretto
+  first_name: ''
+  last_name: ''
+permalink: "/2013/12/08/concurrent-access/"
+---
+<p>In the <em>C++ &amp; task based concurrency </em> posts (<a href="http://bwv1079.wordpress.com/2013/11/20/c11-task-based-concurrency-part-1/">1</a> and <a href="http://bwv1079.wordpress.com/2013/11/21/c11-task-based-concurrency/">2</a>) I show how to write your own task based executor to execute any number of tasks with a user-defined number of OS threads.</p>
+<p>In this post I am showing a <em>ConcurrentAccess</em> type which works together with an <em>Executor</em> instance to serialize access to a shared resource.</p>
+<p>The technique I implement is the one described by <a title="Herb Sutter's blog" href="http://herbsutter.com/">Herb Sutter</a> in his talk <em>C++ concurrency</em> given at the <em>C++ and Beyond 2012</em> conference with one major difference, one minor difference and one addition:</p>
+<ul>
+<li>task-based concurrency with a pre-defined number of threads instead of creating a new thread each time an instance of <code>concurrent&lt;T&gt;</code> is created;</li>
+<li>no mutable: with the mutable modifier standard <em>C++</em> reference types are not supported. However <em>std::reference_wrapper</em> does work;</li>
+<li>full implementation with support for <code>void</code> return type which is missing from Herb's talk.</li>
+</ul>
+<p>The basic idea is to access a resource with a transaction-like pattern:</p>
+<p>[code lang="cpp" light="true"]<br />
+...<br />
+SharedResource sr;<br />
+BEGIN_TRANSACTION(sr);<br />
+  sr.SetData(&quot;data&quot;);<br />
+END_TRANSACTION;<br />
+[/code]</p>
+<h2>Shared access</h2>
+<p>In cases where multiple threads need to access a shared resource you have two main options to synchronize access (i.e. only one OS thread at a time can access the resource):</p>
+<ol>
+<li>blocking:  issue a lock method call on a mutex object and wait until the access is granted;</li>
+<li>non-blocking: add a command to be executed into a queue; the command will be executed in a separate thread while execution is resumed just after the command is added to the queue.</li>
+</ol>
+<p>The focus of this post is on option (2), after creating a synchronized queue I implement a simple wrapper class that wraps the object to access and uses the <em>Executor</em> class to start a task which pops and executes actions from the command queue.</p>
+<p><strong><em>NOTE #1</em></strong>: shared access is nice and easy when you are synchronizing access <span style="text-decoration:underline;">to a single object</span> which does not require itself access to other shared resources, for more complex scenarios I find much more productive to use other techniques involving message passing with e.g. <em>ZeroMQ</em>.</p>
+<h2>Synchronized queue</h2>
+<p>The synchronized queue implementation uses a lock to synchronize access to its elements and a condition variable to block until the queue is not empty.</p>
+<p>Each time a <em>Pop</em> operation is requested the requesting thread waits until the queue contains at least one element then extracts one element from the queue and returns it.</p>
+<p>Each time an object is added to the queue through a <em>Push</em> operation a notification signal is sent so that if there is a client thread waiting for data it can wake up and resume processing.</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt; typename T &gt;<br />
+class SyncQueue {<br />
+public:<br />
+    void Push(const T&amp; e) {<br />
+        //simple scoped lock: acquire mutex in constructor,<br />
+        //release in destructor<br />
+        std::lock_guard&lt; std::mutex &gt; guard(mutex_);<br />
+        queue_.push_front(e);<br />
+        cond_.notify_one(); //notify<br />
+    }<br />
+    T Pop() {<br />
+        //cannot use simple scoped lock here because lock passed to<br />
+        //wait must be able to acquire and release the mutex<br />
+        std::unique_lock&lt; std::mutex &gt; lock(mutex_);<br />
+        //stop and wait for notification if condition is false;<br />
+        //continue otherwise<br />
+        cond_.wait(lock, [this]{return !queue_.empty();});<br />
+        T e = queue_.back();<br />
+        queue_.pop_back();<br />
+        return e;<br />
+    }<br />
+private:<br />
+    std::deque&lt; T &gt; queue_;<br />
+    std::mutex mutex_;<br />
+    std::condition_variable cond_;<br />
+};<br />
+[/code]</p>
+<h2>ConcurrentAccess&lt;T&gt;</h2>
+<p>Objects requiring synchronized access, i.e. only a single thread at a time is allowed to access the object, are wrapped with instances of the <em>ConcurrentAccess</em> type.</p>
+<p>Access to the wrapped object takes place through actions added to an execution queue.</p>
+<p>Actions that operate on the wrapped object are extracted from the queue and executed from within a thread different from the one that adds the action into the queue.</p>
+<p>Access to the wrapped object happens by invoking <em>ConcurrentAccess</em> instances as functor objects, passing in a action to execute in the form of a callable entity (function, function object/functor or lambda).</p>
+<p>The actual code used to access the object looks like a transaction which ensures that while the transaction takes place no other action can interfere with the operations being executed from within the <em>ConcurrentAccess</em> call operator:</p>
+<p>[code lang="cpp" highlight="3,8"]<br />
+string msg = &quot;start\n&quot;;<br />
+//wrap *reference* to 'msg'<br />
+ConcurrentAccess&lt; string&amp; &gt; text(msg, ...);<br />
+...<br />
+//per-task:<br />
+...<br />
+const thread::id calling_thread = this_thread::get_id();<br />
+text([=](string&amp; s){<br />
+    ostringstream oss;<br />
+    oss &lt;&lt; s &lt;&lt; &quot;added by thread &quot; + calling_thread &lt;&lt; endl;<br />
+    s = oss.str();<br />
+});<br />
+...<br />
+[/code]</p>
+<p>In the above code I am wrapping <strong>a reference</strong> to a string with a <em>ConcurrentAccess</em> object, then each thread that needs to access the string does it on line 8 by invoking the <em>ConcurrentAccess</em> instance as a functor passing in a callable object (an unnamed lambda function in this case) which receives a reference to the string to modify.</p>
+<p>The code in lines 9-11 is executed in a thread different from the thread that invokes <em>text(...)</em> and guaranteed to have exclusive access to the <em>msg</em> string variable.</p>
+<p><strong><em>NOTE #2</em></strong>: it all works out if there is no code that tries to access the wrapped object directly without going through the <em>ConcurrentAccess</em> instance. If possible do not wrap references but do wrap any actual object instance that requires synchronized access with a <em>ConcurrentAccess</em> instance. If you want to avoid copying data into the <em>ConcurrentAccess</em> data member you can always implement a <em>ConcurrentAccess</em> constructor that accepts the same parameters as the wrapped type constructor and build the wrapped type in place, or use a move constructor.</p>
+<p><strong><em>NOTE #3</em></strong>: in order for this to work <span style="text-decoration:underline;">the resources that are being accessed by the scheduled actions must be accessible from a thread different from the one that schedules the action for execution</span>, unfortunately this is not the case in many situations, e.g.: when dealing with GPUs for both graphics and compute operations, access to the GPU context must <em>usually</em> happen from within the same thread that creates the context.</p>
+<p>The <em>ConcurrentAccess::operator()(...)</em> method must return an<em> std::future</em> instance used to synchronize and optionally access the result of each scheduled action.</p>
+<p>The <em>ConcurrentAccess</em> type must contain a data member to either store or reference the synchronized object and shall also have access to a synchronized queue where actions are stored for deferred execution.</p>
+<h3>Requirements</h3>
+<p>Now, let's summarize the requirements for a complete implementation of a <em>ConcurrentAccess</em> wrapper:</p>
+<ol>
+<li>on construction: accept a reference to an <em>Executor</em> instance used to schedule action execution;</li>
+<li>expose an <em>operator()(Action)</em> where <em>Action</em> is a callable entity which accepts an argument of the same type  of the wrapped resource or a (constant) reference to the same type as the mapped resource;</li>
+<li>have <em>operator()(Action)</em> return an <em>std::future&lt; T &gt;</em> where <em>T</em> is the type returned from the invocation of the callable entity or <em>void</em> if nothing is returned;</li>
+<li>forward exceptions to the thread that scheduled a specific action for execution;</li>
+<li>stop the task executor on destruction of the <em>ConcurrentAccess</em> instance;</li>
+<li>make it non-copyable.</li>
+</ol>
+<h3>Implementation</h3>
+<h4>0. Data members</h4>
+<p>[code lang="cpp" light="true"]<br />
+template &lt; typename T &gt;<br />
+class ConcurrentAccess {<br />
+    T data_; //warning 'mutable' cannot be applied to references<br />
+    //keep on retrieving actions from queue until done is 'true'<br />
+    bool done_ = false;<br />
+    //action queue<br />
+    SyncQueue&lt; std::function&lt; void () &gt; &gt; queue_;<br />
+    //future returned by executor when pop-execute<br />
+    //loop is added to executor queue<br />
+    std::future&lt; void &gt; f_;<br />
+[/code]</p>
+<h4>1. Construction</h4>
+<p>On construction simply add to the execution queue a function that extracts and executes actions from the action queue in a loop which is terminated when the data member <em>done_</em> is set to true.</p>
+<p>Note that in order to wait for the extract-execute loop to finish after requesting termination, you need to store the future instance returned by the executor for later use.</p>
+<p>[code lang="cpp" light="true"]<br />
+ConcurrentAccess(T data, Executor&amp; e) : data_(data),<br />
+        f_(e([=]{<br />
+                while(!done_) queue_.Pop()();<br />
+             }))<br />
+    {}<br />
+[/code]</p>
+<h4>2.  3. 4.  Call operator and exceptions</h4>
+<p>Add an unnamed function (lambda) to the action queue and return a future to synchronize with the action at a later time.</p>
+<p>The lambda function added to the queue calls the function object passed to the call operator and uses a <em>promise</em> to return a value or set an exception.</p>
+<p>The <em>promise</em> used by the lambda function is created in the call operator body and a pointer to it is copied into the lambda context (closure). Using a shared pointer type guarantees that the promise is automatically destroyed upon exit from the lambda function body.</p>
+<p>Exceptions are forwarded to the calling thread (the one that scheduled the action for execution) by wrapping the execution of the passed callable object with a <em>try</em>/<em>catch</em> block and re-throwing the exception in the <em>catch{}</em> block.</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt; typename F &gt;<br />
+auto operator()(F f)<br />
+-&gt; std::future&lt; decltype(f(data_)) &gt; {<br />
+    using R = decltype(f(data_));<br />
+    auto p = std::make_shared&lt; std::promise&lt; R &gt; &gt;(std::promise&lt; R &gt;());<br />
+    auto ft = p-&gt;get_future();<br />
+    queue_.Push([=]{<br />
+        try {<br />
+            p-&gt;set_value(f(data_));<br />
+        } catch(...) {<br />
+            p-&gt;set_exception(std::current_exception());<br />
+        }<br />
+    });<br />
+    return ft;<br />
+}<br />
+[/code]</p>
+<h4>5. Stop tasks on destruction</h4>
+<p>The extract-execute loop must be stopped when the <em>ConcurrentAccess</em> instance is destroyed.</p>
+<p>The loop stops when the the <em>done_</em> variable is set to true.</p>
+<p>The check for <em>done_</em> takes place after an action has been extracted and executed, if you want the loop to terminate you therefore have to add an action to the queue that sets <em>done_</em> to true so that after such action is executed the <em>while(...)</em> condition evaluates to <em>false</em> and the loop terminates.</p>
+<p>[code lang="cpp" light="true"]<br />
+~ConcurrentAccess() {<br />
+    queue_.Push([=]{done_ = true;});<br />
+    f_.wait();<br />
+}<br />
+[/code]</p>
+<h4>6. Copy and move</h4>
+<p>Copy and move implementations really depend on your specific cases, I hereby decided to disable both move and copy because it is not clear to me why and how you would need to copy a <em>ConcurrentAccess</em> object and what to do with its wrapped data, if I want other functions to interact with the wrapped data in a synchronized way I can simply pass around a reference, <em>std::reference_wrapper</em>, <em>*_ptr</em> to my <em>ConcurrentAccess</em> instance.</p>
+<p>[code lang="cpp" light="true"]<br />
+ConcurrentAccess() = delete;<br />
+ConcurrentAccess(const ConcurrentAccess&amp;) = delete;<br />
+ConcurrentAccess(ConcurrentAccess&amp;&amp;) = delete;<br />
+[/code]</p>
+<p>Also note that the only safe way of copying and moving the wrapped object is through an action stored into the command queue, so if you want to implement copy and move constructors you will have to use the action queue to perform the actual copy or move operation e.g.</p>
+<p>[code lang="cpp" light="true"]<br />
+ConcurrentAccess::ConcurrentAccess(const ConcurrentAccess&amp; ca) {<br />
+...<br />
+    std::future copy = ca([](const T&amp; obj){return obj;});<br />
+    data_ = copy.get();<br />
+...<br />
+}<br />
+[/code]</p>
+<h2>Void return type</h2>
+<p>The current implementation does not support actions that do not return a value, to support such actions we need the call operator to invoke different overloaded methods depending on the return type of the passed action:</p>
+<p>[code lang="cpp" light="true" highlight="5"]<br />
+template &lt; typename F &gt;<br />
+auto operator()(F&amp;&amp; f)<br />
+-&gt; std::future&lt; typename std::result_of&lt; F(T) &gt;::type &gt; {<br />
+    using R = typename std::result_of&lt; F(T) &gt;::type;<br />
+    return Invoke(std::forward&lt; F &gt;(f), typename Void&lt; R &gt;::type());<br />
+}<br />
+[/code]</p>
+<p>The <em>Void</em> <em>struct</em> declares its internal <em>type</em> member as a  type that depends on the return type of the passed action:</p>
+<ul>
+<li>void return type: <em>Void::type</em> is of type <code>VoidType;</code></li>
+<li>non-void return type: <em>Void::type</em> is of type <code>NonVoidType.</code></li>
+</ul>
+<p>The call operator is then able to invoke different <em>Invoke</em> overloads depending on the return type of the user-specified callable object:</p>
+<p>[code lang="cpp" light="true"]<br />
+template &lt; typename F &gt;<br />
+auto Invoke(F&amp;&amp; f, const NonVoidType&amp; )<br />
+-&gt; std::future&lt; typename std::result_of&lt; F(T) &gt;::type &gt; {<br />
+    using R = typename std::result_of&lt; F(T) &gt;::type;<br />
+    auto p = std::make_shared&lt; std::promise&lt; R &gt; &gt;(std::promise&lt; R &gt;());<br />
+    auto ft = p-&gt;get_future();<br />
+    queue_.Push([=]() {<br />
+        try {<br />
+             p-&gt;set_value(f(data_));<br />
+        } catch(...) {<br />
+             p-&gt;set_exception(std::current_exception());<br />
+        }<br />
+    });<br />
+    return ft;<br />
+}</p>
+<p>template &lt; typename F &gt;<br />
+std::future&lt; void &gt; Invoke(F&amp;&amp; f, const VoidType&amp; ) {<br />
+    auto p =<br />
+        std::make_shared&lt; std::promise&lt; void &gt; &gt;(std::promise&lt; void &gt;());<br />
+    auto ft = p-&gt;get_future();<br />
+    queue_.Push([=]() {<br />
+        try {<br />
+             f(data_);<br />
+             p-&gt;set_value();<br />
+        } catch(...) {<br />
+             p-&gt;set_exception(std::current_exception());<br />
+        }<br />
+    });<br />
+    return ft;<br />
+}<br />
+[/code]</p>
+<h2>Final remarks</h2>
+<h3>Thread safety</h3>
+<p>The solution works if you can afford to have the wrapped objects "touched" from threads different from the one that constructs the instance wrapped with <em>ConcurrentAccess</em>. If you cannot and you need to create and access the object from the same thread,  you can still use this solution but need to change the <em>Executor</em> class to support pinning a task to a specific thread. There are a few ways to implement task-thread pinning including:</p>
+<ul>
+<li>have one execution queue per thread and allow the client code to either specify which thread shall execute a task or pick one randomly or in a round-robin fashion;</li>
+<li>use a single queue and tag tasks with a thread id, when a task is extracted from the queue the thread id is compared to the current thread id: if they match the task is executed, if not it is put back into the queue, possibly at the front of the queue. A special tag to indicate that a task can be executed by any thread should be provided as well.</li>
+</ul>
+<h3>A generic pattern</h3>
+<p>The techniques outlined in this post are useful in contexts other than concurrency.</p>
+<p>In general any case in which you need to perform operations before and/or after accessing an object can make use of a transaction-like access strategy, I personally started experimenting with this pattern for cases where the data to use reside in a memory space not directly accessible by the code.</p>
+<p>Cases include  mapped resources for OpenGL, Direct3D, CUDA and OpenCL  or memory regions physically residing on different nodes in a computing cluster accessible through e.g. one-sided MPI or RDMA.</p>
+<p>Example: wrapping an OpenCL memory object.</p>
+<p>[code lang="cpp" light="true"]<br />
+class CLByteBuffer {<br />
+    cl_command_queue cmdQueue_;<br />
+    cl_mem clbuffer_;<br />
+    size_t bufferSize_;<br />
+    ...<br />
+public:<br />
+    ...<br />
+    template &lt; F &gt;<br />
+    void operator(F&amp;&amp; f) {<br />
+        cl_int err;<br />
+        unsigned char* data =<br />
+            clEnqueueMapBuffer(cmdQueue_,<br />
+                               clbuffer_,<br />
+                               CL_TRUE,<br />
+                               CL_MAP_WRITE,<br />
+                               0,<br />
+                               bufferSize_,<br />
+                               0, NULL, NULL, &amp;err);<br />
+        if(err != CL_SUCCESS) throw(CLException(err));</p>
+<p>        f(data, bufferSize_);</p>
+<p>        err =<br />
+            clEnqueueUnmapMemObject(cmdQueue_,<br />
+                                    clbuffer_,<br />
+                                    data,<br />
+                                    0, NULL, NULL);<br />
+        if(err != CL_SUCCESS) throw(CLException(err));<br />
+    }<br />
+    ...<br />
+};</p>
+<p>...<br />
+CLByteBuffer bb;<br />
+...<br />
+bb([=](unsigned char* b, size_t size) {<br />
+    ReadDataFromFile(filename, b, size);<br />
+});<br />
+[/code]</p>
+<p>You could even think of using this strategy for network and file I/O: wrap a socket/file and perform all the read/write through a transaction which adds data to a buffer and flushes the buffer after the lambda function returns.</p>
+<p>[code lang="cpp" light="true"]<br />
+ClientSocket socket(&quot;192.168.1.1&quot;);<br />
+SocketStreamWrapper s(socket);<br />
+...<br />
+s([](ostream&amp; os) {<br />
+    os &lt;&lt; &quot;length is &quot; &lt;&lt; (3 inch);<br />
+});<br />
+...<br />
+[/code]</p>
+<p>The <em>SocketStreamWrapper::operator()(F)</em> call operator can be implemented as a method which uses internally an instance of <em>std::ostringstream</em> which is filled by the user-specified lambda.<br />
+After the lambda returns the string is extracted from the <em>std::ostringstream</em> instance and sent through the wrapped <em>ClientSocket</em> object.</p>
+<h3>Performance and storage considerations</h3>
+<p>When passing a lambda function to the object wrapper instance you should be careful about which data you capture.</p>
+<p>Lambda functions with a non-empty capture specification (i.e. non empty <em>[]</em> expression) are converted to function objects holding a copy or reference to the resources specified in the <em>[]</em> statement.</p>
+<p>In case you have in scope objects that are expensive to copy do not use <em>=</em> to capture everything but either cherry-pick the objects to capture or just use <em>&amp;</em> to capture everything by reference.</p>
+<h2>Resources</h2>
+<p><a href="https://raw.github.com/ugovaretto/cpp11-scratch/master/training/task-based-executor-concurrent-generic.cpp">Source code</a> (includes an <em>Executor</em> implementation)</p>
+<p><a title="C++ concurrency" href="http://channel9.msdn.com/Shows/Going+Deep/C-and-Beyond-2012-Herb-Sutter-Concurrency-and-Parallelism"><em>C++ concurrency</em> talk</a> by Herb Sutter, concurrent access is discussed starting at 00:30:55</p>

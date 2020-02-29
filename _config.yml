@@ -1,3 +1,4 @@
+
 # Welcome to Jekyll!
 #
 # This config file is meant for settings that affect your whole blog, values
@@ -14,10 +15,10 @@
 # You can create any custom variable you would like, and they will be accessible
 # in the templates via {{ site.myvariable }}.
 title: Quaerendo invenietis
-email: candycode@gmail.com
-description: études in code # this means to ignore newlines until "baseurl:"
+#email: candycode@gmail.com
+description: études in code
 baseurl: /bwv1079 # the subpath of your site, e.g. /blog
-url: ugovaretto.github.io # the base hostname & protocol for your site, e.g. http://example.com
+url: ugovaretto-blogs.github.io # the base hostname & protocol for your site, e.g. http://example.com
 #twitter_username: jekyllrb
 github_username: ugovaretto
 
@@ -40,6 +41,8 @@ exclude:
    - Gemfile.lock
    - node_modules
    - .jekyll-cache
+   - __tmp
+   - .DS_Store
 #   - vendor/bundle/
 #   - vendor/cache/
 #   - vendor/gems/

@@ -189,7 +189,7 @@ will be available in the future.
 
 Nice, but how do we signal an error without throwing an exception ?
 
-You could return a composite data type with two members: 
+You could return a composite data type with two members:
 
 * a valid/invalid flag
 * the actual return value if valid flag is `true`
@@ -262,7 +262,7 @@ execution queue.
 
 ## References
 
-*updated February 28 2020*
+*updated February 28, 2020*
 
 Disclaimer: the first reference is to the official ISO C++ 11
 standard document, if you can, do have a look at it; all the threading feautures

@@ -47,3 +47,16 @@ exclude:
 #   - vendor/cache/
 #   - vendor/gems/
 #   - vendor/ruby/
+#
+#Add line numbers: works but layout messed up with current theme
+#same as using
+#{% highlight javascript linenos %}
+#    function some(code) { /*goes here*/ }
+#    let x = 21;
+#{% endhighlight %}
+#markdown: kramdown
+#kramdown:
+#    highlighter: rouge
+#    syntax_highlighter_opts:
+#        block:
+#            line_numbers: true

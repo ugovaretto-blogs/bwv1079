@@ -16,25 +16,6 @@ part of the standard which I believe makes a lot of sense: I do not think it is
 possible to easily specify a task-based solution generic enough which makes
 sense to "standardize".
 
-I'm personally never happy with the various solutions offered by e.g. TBB or
-OpenMP, since I want/need to deal with things like:
-
-* dynamic parallelism (change the number of parallel executing threads as you go)
-* dynamic task mapping: change the number of tasks assigned to a signle thread at
-  run-time
-* logging: have threads log the parameters and results passed to them
-  automatically without having to explicitly write logging code in the thread body
-* hybrid architectures: need to synchronize CPU threads with parallel execution on
-  accelerators
-* shared cache/memoization: what if I want to intercept the
-  parameters passed to a callable object scheduled for execution, use the
-  parameters as a key and return a pre-computed value if available ?
-* parallelization strategy:
-    * single shared task queue
-    * multiple shared task queues load balanced with round robin 
-    * one data queue per thread with work stealing
-    ...
-
 As you will see in the second part of this post where I show a possible
 implementation for a task executor, creating your own solution with the new
 C++11 facilities is actually pretty straightforward.
@@ -263,6 +244,8 @@ execution queue.
 ## References
 
 *updated February 28, 2020*
+
+[Part 2]({{site.baseurl}}/c11-task-based-concurrency-part-2/)
 
 Disclaimer: the first reference is to the official ISO C++ 11
 standard document, if you can, do have a look at it; all the threading feautures

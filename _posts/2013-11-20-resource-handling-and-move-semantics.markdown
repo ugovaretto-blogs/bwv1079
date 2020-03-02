@@ -5,8 +5,6 @@ categories: [C++, C++11, Move semantics]
 permalink: /resource-handling-and-move-semantics/
 ---
 
-# Resource handling and move semantics
-
 Techniques to automatically manage the run-time lifetime of resources include
 reference counting, where multiple references to the same resource exist, and
 ownership transfer where only a single reference to a resource at any given time

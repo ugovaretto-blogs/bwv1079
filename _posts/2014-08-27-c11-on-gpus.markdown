@@ -1,0 +1,46 @@
+---
+layout: post
+title: C++11 on GPUs
+categories: [C++, C++11, CUDA, OpenCL, GPU]
+permalink: /c11-on-gpus/
+---
+
+_[reviewed March 2020 - outdated, might be worth looking at the test code]_
+
+I recently had to check the support of C++11 constructs on compilers
+that target accelerators such as NVIDIA and AMD GPUs.
+
+One option you have nowadays is to use CLang/LLVM to generate PTX code
+directly from C++ but this approach introduces another set of issues,
+which can be addressed only by basically implementing your very own
+custom compiler or a set of compiler wrappers.
+
+In the case of accelerators supporting the OpenCL standard there is no
+explicit C++11 support at the time of this writing, however the new
+SYCL standard that specifies a C++11-based language suitable for
+writing code for massively parallel devices is going to be released
+soon.
+
+## CUDA 
+
+Up to CUDA 6.0 not only the code targeting the accelerator but
+even the code targeting the host (CPU) was not allowed to include any
+C++11 features when compiled with nvcc.
+
+The good news is that as of CUDA 6.5 the entire set of new features
+introduced in the C++11 standard seems to be supported except for
+`alignas`.
+
+Code is available [here](https://github.com/ugovaretto/cuda-training/blob/master/src/021_0_cpp11-global-shared-memory.cu), you can check for yourself the list of tested features by looking 
+at the comment header and reading through the code.
+
+The set of features that are not conforming with the standard or
+require special handling is listed below:
+
+* default constructors: `__device__` prefix required 
+* `constexpr`: does work as a template argument (as e.g. in static_assert); 
+  does not work as size of POD array 
+* `alignas`: NOT SUPPORTED 
+* attributes: `[[attribute]]` is parsed correctly and does not result
+in compilation errors but it cannot (yet?) be used to specify 
+`__host__` or `__device__` placement

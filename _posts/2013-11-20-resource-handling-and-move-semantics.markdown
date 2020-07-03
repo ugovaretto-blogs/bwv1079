@@ -43,7 +43,7 @@ A minimal resource handling class shall accept a resource identifier in its
 constructor and destroy it in the destructor.
 E.g.
 
-~~~~~~~~~cpp
+```cpp
 template <typename T>
 class MemoryHandler {
 public:
@@ -54,18 +54,18 @@ public:
 private:
     T* ptr_;
 };
-~~~~~~~~~~~~
+```
 
 This class can already be used to perform simple scope-based resource
 management: the resource is deleted when the handler goes out of scope.
 
-~~~~~~~~~cpp
+```cpp
 void PrintCppStd() {
     MemoryHandler< Printer > mh(new Printer("remote printer 1"));
     Printer* p = mh.ptr();
     p->Print("./ISO_IEC_14882-2011.pdf");
 } //resource automatically destroyed by MemoryHandler destructor upon exit
-~~~~~~~~~
+```
 
 The resource is destroyed by the Printer destructor when the instance goes out
 of scope, this means that there must be only a single instance of `MemoryHandler`
@@ -84,17 +84,17 @@ To implement ownership transfer we can start by adding a copy constructor and
 assignment operator accepting a non-constant reference to another reference
 handler which copies the pointer and resets the pointer in the source object:
 
-~~~~~~~~~cpp
+```cpp
 MemoryHandler(MemoryHandler& mh) : ptr_(mh.ptr_) {
     mh.ptr_ = 0;
 }
-~~~~~~~~~~~~
+```
 
 A copy constructor accepting a non-constant reference can however only be used
 to copy from non-temporary objects and will not work with objects returned from
 functions.
 
-## Ownership transfer 
+## Ownership transfer
 
 In order to have ownership transfer work with temporary
 source objects we need to implement a proper copy constructor and assignment
@@ -165,18 +165,18 @@ trick.
 The Proxy type is implemented as an inner class, no need for visibility from
 the outside:
 
-~~~~~~~~~cpp
+```cpp
 template class MemoryHandler {
 private:
     struct Proxy {
         T* ptr;
     };
 ...
-~~~~~~~~~~~~
+```
 
 Conversion operator, constructor and assignment:
 
-~~~~~~~~~cpp
+```cpp
     operator Proxy() {
         T* ptr = ptr_;
         Proxy p;
@@ -196,7 +196,7 @@ private: //helper swap method
     void Swap(MemoryHandler& mh) {
         std::swap(mh.ptr_, ptr_);
     }
-~~~~~~~~~~~~
+```
 
 ## Limitations
 
@@ -213,21 +213,21 @@ objects
 Now let's see what happens if you try to store an instance of `MemoryHandler`
 into a standard container such as `std::vector`:
 
-~~~~~~~~~cpp
+```cpp
 std::vector< MemoryHandler< int > > mhandlers1;
 mhandlers1.push_back(MemoryHandler< int >(new int(1)));
 std::vector< MemoryHandler< int > > mhandlers2(1);
 MemoryHandler< int > mh(new int(1));
 mhandlers2[0] = mh;
-~~~~~~~~~~~~
+```
 
 When compiling with clang++ the first reported error is:
 
-~~~~~~~~~~~~
+```cpp
 error: no matching constructor for initialization of 'MemoryHandler'
 { ::new(__p) _Tp(__val); }
-^ ~~~~~
-~~~~~~~~~~~~
+^ ~~
+```
 
 this is because there is no copy constructor available which accepts a constant
 reference.
@@ -261,7 +261,7 @@ previously stored pointer.
 The code to manage a set of handles within a container then looks like:
 
 
-~~~~~~~~~cpp
+```cpp
 //create a handler wrapping a heap allocated standard container
 MemoryHandler< std::vector< int* > > handler(new std::vector< int* >);
 std::vector<int*>& handles = *handler.ptr();
@@ -277,25 +277,25 @@ handles.push_back(mhIn.release());
 MemoryHandler mhOut(handles.front());
 //manually reset the pointer in the container:
 handles.front() = 0; //moved; need to do this automatically
-~~~~~~~~~~~~
+```
 
 To perform the resource extraction and automatically reset the source handle in
 one call you can use a simple release function:
 
-~~~~~~~~~cpp
+```cpp
 template < typename T >
 T* release(T*& rh) {
     T* ret = rh;
     rh = 0;
     return ret;
 }
-~~~~~~~~~~~~
+```
 
 The code to perform the actual resource extraction and reset then becomes:
 
-~~~~~~~~~cpp
+```cpp
 MemoryHandler< int > mhOut(reset(handles.front()));
-~~~~~~~~~~~~
+```
 
 without the need to explicitly set the std::vector element to zero.
 
@@ -318,7 +318,7 @@ move.
 Here is the same `MemoryHandler` class implemented with r-value references and
 calls to `std::move` when needed.
 
-~~~~~~~~~cpp
+```cpp
 template < typename T >
 class MemoryHandler {
 private:
@@ -347,7 +347,7 @@ private:
 private:
     T* ptr_;
 };
-~~~~~~~~~~~~
+```
 
 If you are however stuck with compilers like Open64, Cray or NVIDIA nvcc you
 will need to use the various strategies outlined in the previous sections for
@@ -362,7 +362,7 @@ use versions of the `MemoryHandler` implemented in this article by simply
 wrapping the resource handles with a heap allocated instance of a wrapper
 class. e.g.
 
-~~~~~~~~~cpp
+```cpp
 class Socket {
 public:
     Socket(int s) : socket_(s) {}
@@ -375,7 +375,7 @@ private:
 MemoryHandler< Socket >
 sh(new Socket(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)));
 int aSocket = sh.ptr()->get();
-~~~~~~~~~~~~
+```
 
 If you want to avoid memory management operations you can always define a
 generic Handler class using policy based design, you'll need policies for:
@@ -392,7 +392,7 @@ invoked instead of delete.
 A reworked version of the MemoryHandler class is shown below (C++11 version
 only).
 
-~~~~~~~~~cpp
+```cpp
 template <typename T,
           typename ValidationPolicy,
           typename ResetPolicy,
@@ -426,7 +426,7 @@ private:
 private:
     T res_;
 };
-~~~~~~~~~~~~
+```
 
 C++11 standard collections do support move semantics out of the box through
 r-value references, it is therefore possible to move objects into collections

@@ -101,6 +101,7 @@ void FooImpl(HeadType&& head, TailTypes&&...tail) {
 Will not work because in order for the variadic expression to be expanded
 it has to be consumed by some other callable entitiy or initializer list,
 which in turn requires the expression to be returning a value.
+
 The following code will do the trick:
 
 ```cpp

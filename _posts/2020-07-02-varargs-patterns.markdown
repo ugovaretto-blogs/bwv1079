@@ -60,7 +60,7 @@ int main() {
 ````
 
 <div style="text-align: right"> 
-    <a href="https://godbolt.org/z/axW5dP">code</a>
+    <a href="https://godbolt.org/z/axW5dP">run</a>
 </div>
 
 The line
@@ -149,12 +149,12 @@ int main() {
 ```
 
 <div style="text-align: right"> 
-    <a href="https://godbolt.org/z/h6ojqh">code</a>
+    <a href="https://godbolt.org/z/h6ojqh">run</a>
 </div>
 
 
 
 TODO: code with fold expression
 <div style="text-align: right"> 
-    <a href="https://godbolt.org/z/Ese78d">code</a>
+    <a href="https://godbolt.org/z/Ese78d">run</a>
 </div>

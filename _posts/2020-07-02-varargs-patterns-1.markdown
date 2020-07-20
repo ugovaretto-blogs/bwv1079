@@ -2,7 +2,7 @@
 layout: post
 title: Variadic template patterns - part one
 categories: [C++, C++11, C++14, C++17]
-permalink: /varargs-patterns/
+permalink: /varargs-patterns-1/
 ---
 
 This series of short blog articles simply gathers in one place all the different
@@ -43,7 +43,7 @@ and it does work equally well with non-type template parameters.
 
 <div style='text-align: right' markdown='1'>
 
-[top](#variadic-template-patterns-part-one)
+[top](#content)
 
 </div>
 
@@ -104,7 +104,7 @@ void FooImpl<int, int, int, int, char const (&) [6]>(int&&, int&&, int&&,
 
 <div style='text-align: right' markdown='1'>
 
-[top](#variadic-template-patterns-part-one)
+[top](#content)
 
 </div>
 

@@ -1,11 +1,9 @@
 ---
 layout: post
-title: Varargs patterns
+title: Variadic template patterns - part one
 categories: [C++, C++11, C++14, C++17]
 permalink: /varargs-patterns/
 ---
-
-# Variadic template patterns - part one
 
 This series of short blog articles simply gathers in one place all the different
 usage patterns for variadic template expressions, so that it can be used

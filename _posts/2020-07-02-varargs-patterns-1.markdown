@@ -190,7 +190,7 @@ int main() {
 
 <div style='text-align: right' markdown='1'>
 
-[top](#variadic-template-patterns-part-one)
+[top](#content)
 
 </div>
 

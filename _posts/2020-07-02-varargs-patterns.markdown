@@ -5,7 +5,25 @@ categories: [C++, C++11, C++14, C++17]
 permalink: /varargs-patterns/
 ---
 
-# Variadic template patterns
+# Variadic template patterns - part one
+
+This series of short blog articles simply gathers in one place all the different
+usage patterns for variadic template expressions, so that it can be used
+as a reference (mainly by me) as needed.
+
+### Content
+    
+&#x2058; [Introduction](#introduction)
+    
+&#x2058; [Basics](#basics)
+    
+&#x2058; [Argument expansion](#argument-expansion)
+    
+&#x2058; [Fold expressions](#fold-expressions)
+    
+&#x2058; [Template template parameters](#template-template-parameters)
+
+## Introduction
 
 `C++11` introduces variable length template argument lists, meaning that the
 list of template arguments does not have to be fully specified using an actual
@@ -23,7 +41,13 @@ template <typename T1, typename T2>
 
 and it does work equally well with non-type template parameters.
 
-##Basics
+##Basics 
+
+<div style='text-align: right' markdown='1'>
+
+[top](#variadic-template-patterns-part-one)
+
+</div>
 
 The `...` operator causes the replacement, of `Expression...` with the
 actual comma separated list of template expressions defined at compile time.
@@ -79,6 +103,12 @@ void FooImpl<int, int, int, int, char const (&) [6]>(int&&, int&&, int&&,
 ```
 
 ##Argument expansion
+
+<div style='text-align: right' markdown='1'>
+
+[top](#variadic-template-patterns-part-one)
+
+</div>
 
 Now, trying to trigger an expansion by writing
 
@@ -160,6 +190,12 @@ int main() {
 
 ##Fold expressions
 
+<div style='text-align: right' markdown='1'>
+
+[top](#variadic-template-patterns-part-one)
+
+</div>
+
 Instead of triggering an expansion by passing the vararg expression as an 
 argument to a callable entity, fold expressions, available starting with
 *C++17* can be used:
@@ -219,6 +255,12 @@ In the code above `(...,(cout << " " << tail))` is interpreted as:
   are elements in `tail`, separated by the `,` operator
 
 ## Template template parameters
+
+<div style='text-align: right' markdown='1'>
+
+[top](#variadic-template-patterns-part-one)
+
+</div>
 
 When specifying template template parameters in parameter lists, without using
 the ellipsis operator, you are required to know how many template parameters

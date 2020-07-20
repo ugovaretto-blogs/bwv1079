@@ -41,7 +41,7 @@ template <typename T1, typename T2>
 
 and it does work equally well with non-type template parameters.
 
-##Basics 
+## Basics
 
 <div style='text-align: right' markdown='1'>
 
@@ -102,7 +102,7 @@ void FooImpl<int, int, int, int, char const (&) [6]>(int&&, int&&, int&&,
                                                      int&&, char const (&) [6])
 ```
 
-##Argument expansion
+## Argument expansion
 
 <div style='text-align: right' markdown='1'>
 
@@ -188,7 +188,7 @@ int main() {
     <a href="https://godbolt.org/z/h6ojqh">run</a>
 </div>
 
-##Fold expressions
+## Fold expressions
 
 <div style='text-align: right' markdown='1'>
 

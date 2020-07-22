@@ -182,7 +182,7 @@ using namespace std;
 template <typename T, typename...RestT>
 struct Tuple : Tuple<RestT...> {
     using Base = Tuple<RestT...>;
-    static constexpr size_t NumTypes = 1 + Base::NumTypes; 
+    static constexpr size_t NumElements = 1 + Base::NumElements; 
     T value;
     constexpr Tuple(const T& v, const RestT&...r) : Base(r...), value(v) {}
 };
@@ -190,7 +190,7 @@ struct Tuple : Tuple<RestT...> {
 template <typename T>
 struct Tuple<T> {
     using Base = Tuple<T>;
-    static constexpr size_t NumTypes = 1;
+    static constexpr size_t NumElements = 1;
     T value;
     constexpr Tuple(const T& v) : value(v) {}
 };
@@ -198,7 +198,7 @@ struct Tuple<T> {
 template <typename T>
 concept IsTuple = requires {
     typename T::Base;
-    T::NumTypes;
+    T::NumElements;
 };
 
 template<size_t I, typename T>
@@ -209,7 +209,7 @@ requires (I == 0) && IsTuple<T> {
 
 template<size_t I, typename T>
 constexpr const auto&  get(const T& t)
-requires (I > 0 && I < T::NumTypes) && IsTuple<T> {
+requires (I > 0 && I < T::NumElements) && IsTuple<T> {
     using Base = typename T::Base;
     return get<I-1>((const Base&) t);
 }
@@ -222,7 +222,7 @@ requires (I == 0) && IsTuple<T> {
 
 template<size_t I, typename T>
 constexpr auto&  get(T& t)
-requires (I > 0 && I < T::NumTypes) && IsTuple<T> {
+requires (I > 0 && I < T::NumElements) && IsTuple<T> {
     using Base = typename T::Base;
     return get<I-1>((Base&) t);
 }

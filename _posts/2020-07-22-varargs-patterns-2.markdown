@@ -18,7 +18,7 @@ including support for concepts, introduced in C++20.
     
 &#x2058; [Integer index sequence](#integer-sequence)
     
-&#x2058; [Generic integer sequences](#fold-expressions)
+&#x2058; [Generic integer sequences](#generic-integer-sequence)
 
 *Under construction*
 
@@ -57,7 +57,6 @@ struct Tuple : Tuple<RestT...> {
 
 template <typename T>
 struct Tuple<T> {
-    using Base = Tuple<T>;
     T value;
     constexpr Tuple(const T& v) : value(v) {}
 };
@@ -148,7 +147,7 @@ struct Tuple : Tuple<RestT...> {
 
 template <typename T>
 struct Tuple<T> {
-    using Base = Tuple<T>;
+    //using Base = Tuple<T>;
     T value;
     constexpr Tuple(const T& v) : value(v) {}
 };
@@ -206,3 +205,149 @@ int main(int, char**) {
 
 ## Zip iterator
 
+Zipping operations refer to the capability of composing a single sequence out
+of multiple sequences where each i-th element of the new sequence contains a tuple
+of elements read from position i in the input sequences, or when iterators
+are used, the zip iterator contains a tuple of iterators instead. 
+
+Ideally we would like to be able to write code like:
+
+```cpp
+vector<string> words = {"first", "second", "third"};
+vector<int> indices = {1, 2, 3};
+vector<tuple<int, string>> indexedWords(Zipper(begin(indices), begin(words)),
+                                        Zipper(end(indices), end(words)));
+for(auto t: indexedWords) cout << get<0>(t) << ": " << get<1>(t) << endl;
+```
+
+ouput:
+
+```term
+1: first
+2: second
+3: third
+```
+
+What follows is an minimal implementation of a zip (forward) iterator useful 
+to lazily invoke other iterators and/or build new zipped sequences.
+Fold expression are used to simplify code by avoiding recursive template
+expansion.
+
+The minimal functionality to implement is:
+
+1. increment operator, to advance to next element
+2. dereference operator, to retrieve value
+3. equality operator, to allow `begin()` - `end()` iteration
+
+```cpp
+#include <iostream>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
+#include <iterator>
+
+using namespace std;
+
+template <typename... ArgsT>
+class Zipper {
+  private:
+    using Indices =
+        std::make_index_sequence<tuple_size<tuple<ArgsT...>>::value>;
+    using ValueTuple = tuple<typename ArgsT::value_type&...>;
+    tuple<ArgsT...> its_;
+  public:
+    using difference_type = ptrdiff_t;
+    using value_type = tuple<ArgsT...>;
+    using pointer = value_type*;
+    using reference = value_type&;
+    using iterator_category = forward_iterator_tag;
+
+  public:
+    Zipper() = delete;
+    Zipper(ArgsT... i) : its_(i...) {}
+    Zipper(const Zipper&) = default;
+    Zipper(Zipper&&) = default;
+    Zipper& operator++() {
+        IncIterators(Indices{});
+        return *this;
+    }
+    ValueTuple operator*() const { return Values(Indices{}); }
+    bool operator==(const Zipper& other) const {
+        return Equal(other, Indices{});
+    }
+    bool operator!=(const Zipper& other) const { return !operator==(other); }
+
+   private:
+    template <size_t... I>
+    void IncIterators(const index_sequence<I...>&) {
+        (get<I>(its_)++, ...);
+    }
+    template <size_t... I>
+    ValueTuple Values(const index_sequence<I...>&) const {
+        return ValueTuple(*get<I>(its_)...);
+    }
+    template <size_t... I>
+    bool Equal(const Zipper& other, const index_sequence<I...>&) const {
+        return (... && (get<I>(its_) == get<I>(other.its_)));
+    }
+};
+
+template <typename... ArgsT>
+pair<Zipper<typename ArgsT::iterator...>,
+     Zipper<typename ArgsT::iterator...>> constexpr Zip(ArgsT&... seqs) {
+    return {Zipper<typename ArgsT::iterator...>(begin(seqs)...),
+            Zipper<typename ArgsT::iterator...>(end(seqs)...)};
+}
+
+template <typename... ArgsT>
+pair<Zipper<typename ArgsT::const_iterator...>,
+     Zipper<typename ArgsT::
+                const_iterator...>> constexpr Zip(const ArgsT&... seqs) {
+    return {Zipper<typename ArgsT::iterator...>(begin(seqs)...),
+            Zipper<typename ArgsT::iterator...>(end(seqs)...)};
+}
+
+template <typename F, typename S>
+F constexpr begin(pair<F, S> p) {return p.first;}
+
+template <typename F, typename S>
+F constexpr end(pair<F, S> p) {return p.second;}
+
+int main(int argc, char const* argv[]) {
+    vector<int> ints{1, 2, 3};
+    vector<string> strings{"1", "2", "3"};
+    Zipper zzip(begin(ints), begin(strings));
+    Zipper zzend(end(ints), end(strings));
+    do {
+        auto [i, s] = *zzip;
+        cout << "{" << i << ", " << s << "} ";
+    } while (++zzip != zzend);
+
+    auto z = Zip(ints, strings);
+
+    do {
+        auto [i, s] = *z.first;
+        cout << "{" << i << ", " << s << "} ";
+    } while (++z.first != z.second);
+    cout << endl;
+
+    auto it = Zip(ints, strings);
+
+    for(auto [i, x]: it) {
+        cout << i << " " << x << endl;
+    }
+
+    vector<string> words = {"first", "second", "third"};
+    vector<int> indices = {1, 2, 3};
+    vector<tuple<int, string>> indexedWords(Zipper(begin(indices), begin(words)),
+                                            Zipper(end(indices), end(words)));
+    for(auto t: indexedWords) cout << get<0>(t) << ": " << get<1>(t) << endl;
+
+    return 0;
+}
+```
+
+<div style='text-align: right' markdown='1'>
+  <a href="https://godbolt.org/z/cx57GT">run</a>
+</div>

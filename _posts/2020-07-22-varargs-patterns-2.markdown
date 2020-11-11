@@ -15,11 +15,9 @@ and fold expressions (*C++17) are used to simplify implementations.
 
 &#x2058; [Zip iterator](#zip-iterator)
     
-&#x2058; [Integer index sequence](#integer-sequence)
+&#x2058; [Integer sequence](#integer-sequence)
     
-&#x2058; [Generic integer sequences](#generic-integer-sequence)
 
-*Under construction*
 
 ## Tuple
 
@@ -466,24 +464,27 @@ int main(int argc, char const* argv[]) {
   <a href="https://godbolt.org/z/cx57GT">run</a>
 </div>
 
-## Index sequences
+## Integer sequences
 
-As shown above index sequences are used to expand the variable argument 
+As shown above integer sequences are used to expand the variable argument
 parameter pack in case of non-type, integral, template parameters.
 This type has been available since the *C++14* standard, but it might be useful
-to look at an actual minimal implementation.
+to look at an actual minimal implementation which helps in better understand
+vardiadic template pack expansion rules.
+
 The type itself is only useful to transfer the non-type template argument list
 to a function or class and it is rarely used directly.
 
 See [here](https://en.cppreference.com/w/cpp/utility/integer_sequence) for sample usage.
 
-The implementation of a compile-time integer sequence is straightforward, while
-normally templates are expanded recursively decrementing a counter and
-reducing the number of elements passed to the next iteration step, in this
-case the counter gets incremented but the non-type template list grows at
-each step.
+The implementation of a compile-time integer sequence is straightforward; while
+normally templates are expanded recursively through reverse inheritance patterns,
+decrementing a counter and reducing the number of elements passed to the next
+iteration step, in this case the counter gets decremented but the non-type
+template list grows at every step.
 
-A new number equal to the size of the computed argument list plus one.
+A new number equal to the size of the computed argument list plus one is
+generated at each expansion step.
 This works because in zero-based indexing the size of the sequence is always
 equal to one plus the last index value.
 

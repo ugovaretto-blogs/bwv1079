@@ -162,11 +162,11 @@ void PrintBitsSep(const T n) {
     static_assert(is_integral<T>::value);
     const int BITS = 8 * sizeof(T);
     for (int i = BITS; i >= 0; --i) {
-        const int v = (n & (1 << i)) >> i;
-        cout << v;
         if((... || (i == BITS - Separators))) {
             cout << " ";
         }
+        const int v = (n & (1 << i)) >> i;
+        cout << v;
     }
 }
 
@@ -188,7 +188,9 @@ int main(int argc, char const *argv[]) {
     assert(fi.i == IntFloat(fi.f));
     cout << "float number: " << fi.f << endl;
     cout << "float bits:   ";
-    PrintBitsSep<decltype(fi.i), 0, 8>(fi.i);
+    constexpr int EXPONENT = 1;
+    constexpr int MANTISSA = 9;
+    PrintBitsSep<decltype(fi.i), EXPONENT, MANTISSA>(fi.i);
     cout << endl;
     cout << "uint32_t:     " << fi.i << endl;
     Float<10.234_f> f;

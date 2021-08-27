@@ -83,6 +83,7 @@ for(int t = 0; t != nthreads_; ++t) {
             ICaller* c = queue_.Pop();
             if(c->Empty()) { //interpret an empty Caller as a
                 //'terminate' message
+                delete c;
                 break;
             }
             c->Invoke();

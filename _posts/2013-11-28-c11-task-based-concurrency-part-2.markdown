@@ -147,8 +147,8 @@ class Caller : public ICaller {
 public:
     template < typename F, typename... Args >
     Caller(F&& f, Args&&... args) :
-        f_(std::bind(std::forward(f),
-                     std::forward(args)...)),
+        f_(std::bind(std::forward<F>(f),
+                     std::forward<Args>(args)...)),
         empty_(false) {}
     Caller() : empty_(true) {}
     std::future< ResultType > GetFuture() {

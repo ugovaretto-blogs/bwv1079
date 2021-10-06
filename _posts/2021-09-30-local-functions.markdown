@@ -47,7 +47,7 @@ which results in the following output:
 10 11 12 13 14 15 16 17 18 19
 ```
 
-Now, this works but what you cannot di is using the same generator function
+Now, this works but what you cannot do is using the same generator function
 to create multiple independent counters.
 The following code will have both `counter1` and `counter2` increment the same
 variable.
@@ -67,7 +67,7 @@ output
 instead of the desired `2 3` output.
 
 One way to generare unique generators at compile time is to just add a template
-parameter to idendify different instances.
+parameter to identify different instances.
 
 ```cpp
 template <int ID = 0>
@@ -96,10 +96,15 @@ output
 2 3
 ```
 
-This approach allows to e.g. implement OOP concepts by storing a local instance
-of the data inside an enclosing function and accessing the instance through
-a standard C structure with function pointers or C++ classes not containing any
-data members.
+## Applications
+
+This approach allows to e.g. implement Object Oriented concepts by storing
+a local instance of the data inside an enclosing function and accessing the
+instance through a standard `C` `struct` with function pointers or C++ classes
+not containing any data members.
+
+In the case of `C` `struct`s variables can be passed to any `C` library and will
+behave like stateful objects.
 
 The following code implements a constructor returnin a C++ `struct` containing
 only function pointers and a couple of methods to perform type-safe access to
@@ -134,13 +139,14 @@ Object MakeSphere(double radius, const Vec3D& position) {
 Code implementing the discussed concepts and more is available
 [here](https://github.com/ugovaretto/cpp11-scratch/blob/master/training/local_functions.cpp)
 
-## Run-time instances
+### Run-time instances
 
 The above code can only generate instances at compile-time; run-time generation
 requires storing instances in local data stores (e.g. `unordered_map`)
 and passing an instance id around.
+
 One advantage of keeping all instances in one place outside the class used to
-access the data is the ability to use an external centralised (possibly remote)
+access the data is the ability to use an external centralized (possibly remote)
 data storage, with the client code staying the same regardless of where
 the data is actually stored.
 
@@ -178,5 +184,5 @@ private:
 ```
 
 Smart pointers and lock guards can be employed to allow the use of `static`
-instead of `thread_local` variable and sharing.
+instead of `thread_local` variables and sharing.
 

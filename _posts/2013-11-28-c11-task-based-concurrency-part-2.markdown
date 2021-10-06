@@ -83,6 +83,7 @@ for(int t = 0; t != nthreads_; ++t) {
             ICaller* c = queue_.Pop();
             if(c->Empty()) { //interpret an empty Caller as a
                 //'terminate' message
+                delete c;
                 break;
             }
             c->Invoke();
@@ -146,8 +147,8 @@ class Caller : public ICaller {
 public:
     template < typename F, typename... Args >
     Caller(F&& f, Args&&... args) :
-        f_(std::bind(std::forward(f),
-                     std::forward(args)...)),
+        f_(std::bind(std::forward<F>(f),
+                     std::forward<Args>(args)...)),
         empty_(false) {}
     Caller() : empty_(true) {}
     std::future< ResultType > GetFuture() {

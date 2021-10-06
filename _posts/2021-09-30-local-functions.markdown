@@ -187,8 +187,8 @@ The described access patterns is similar to the
 [PImpl](https://en.cppreference.com/w/cpp/language/pimpl) idiom but hiding even
 the instance address.
 
-Pre-allocating memory and populating the local store with instances and
-returning such instances at creation time allows to avoid allocations at
+Pre-allocating memory and populating the local store with instances, and
+returning such instances at creation time, allows to avoid allocations at
 run-time.
 
 Smart pointers and lock guards can be employed to allow the use of `static`

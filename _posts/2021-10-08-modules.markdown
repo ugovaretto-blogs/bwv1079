@@ -1,0 +1,454 @@
+---
+layout: post
+title: Modules
+categories: [C++20, modules]
+permalink: /modules/
+---
+
+The C++20 standard introduces the concept of (compile-time) modules, allowing to package and isolate resources in separate pre-compiled units, each of which
+should map to a separate translation unit.
+
+In addition to achieving full isolation for all C/C++ constructs including
+macros, modules have the potential to greatly reduce compilation time, similarly
+to pre-compiled headers.
+
+At the time of this this writing (`gcc` 11, `clang` 12) modules are mostly supported
+by the main C++ compilers; the toolchain required and implementation details
+are however very different between `gcc` and `clang`, which makes using module not yet viable IMHO.
+
+Configuration is not trivial, `clang` 13 seems to have 18 command line
+switches to configure module compilation and `gcc` has this concept of
+*module mapper* in theory accessible over a network.
+
+A detailed description of modules is found in the standard and e.g. 
+[here](https://en.cppreference.com/w/cpp/language/modules).
+
+In this article I will focus on the practical aspects of building code that
+uses modules, describing the major differences between compilers and outlining
+current limitations.
+
+The two compilers I used to experiment with modules on x86 hardware are:
+
+```sh
+gcc-11 (Ubuntu 11.1.0-1ubuntu1~21.04) 11.1.0
+
+Ubuntu clang version 12.0.0-3ubuntu1~21.04.2
+```
+
+## `import` vs `#include`
+
+When `#including` code into a file we are physically copying and pasting lines
+of code from the included file into each file that invokes the `#include` 
+directive, which means that each `#included` file is copied multiple times
+into other files, requiring the compiler to parse the same code once for each
+time the `#include` file is included.
+
+Macros are defined all in the same namespace and can clash with previously defined macros.
+
+Modules address the above problems by precompiling code and only sharing the
+portion needed in each translation unit.
+
+Also, in many cases declarations and implementations are stored in separate
+files while with modules it's easy to use a single file and explicitly
+export the public interface, which brings us to another fundamental difference
+from plain C++ files: visibility in modules is private by default and exported
+items have to be explicitly marked with an `export` keyword.
+
+The way to access C++ constructs defined in separate modules is to use the
+`import` directive instead of `#include` like this:
+
+```cpp
+import <iostream>;
+
+int main(int argc, const char** argv) {
+    std::cout << "Hello Modules!" << std::endl;
+    return 0;
+}
+```
+
+Comparing the size of the translation unit to the following code using
+the `#include` directive:
+
+```cpp
+#include <iostream>
+
+int main(int argc, const char** argv) {
+    std::cout << "Hello Modules!" << std::endl;
+    return 0;
+}
+```
+
+with the `-E` options which prints the preprocessor output, yields:
+
+| directive          | bytes   | multiplier |
+| ------------------ | ------- | ---------- |
+| `import`           | 321     | 1x         |
+| `#include`         | 1070397 | 3334x      |
+| `#include` (`-O3`) | 1123523 | 3500x      |
+
+So the total number of characters parsed by the compiler is the above number
+multiplied by the number of files including `<iostream>`.
+
+Note that compiling with optimization flags will normally result in bigger size.
+
+## Compiling and importing
+
+When it comes to compiling, *gcc* and *clang* exhibit very different behavior.
+
+### `gcc`
+`gcc` creates a local cache for compiled modules and requires manual compilation
+of system headers.
+
+### `clang`
+`clang` comes with pre-compiled system modules when using `libc++`, however as we have
+seen above, optimization flags do have an effect on compiled headers,
+and it's not clear how such headers have been pre-compiled, but given the fact
+that clang seems to be storing the AST inside modules it might be that all
+optimizations are applied at a later stage.
+The other big difference from `gcc` which makes it more cumbersome to use is that
+it requires manual compilation of the module interface files, and in some cases
+the use of additional compile time flags, it also seems to have issues with
+compiled template code in modules, but it might well be that I could not figure
+out the right combination of command line flags since clang has a lot
+of switches which affect module processing behavior, more on this later.
+
+### Using modules
+
+Importing a module is as simple as invoking `import` as we have seen above.
+
+To create a module and export C++ constructs you use the `module` keyword and
+`export` directive.
+
+As a reminder, there was an attempt to implement the `export` directive for
+templates which was supposed to be removed by the standard. From memory I
+believe only the EDG-based compilers (Comeau, Intel and others) had a working
+implementation.
+
+Code showing how to export a module follows, `iostream` is imported into
+the `io` module then exported:
+
+```cpp
+export module io;
+export import <iostream>;
+```
+
+Client code can access `iostream` by importing `io`:
+
+```cpp
+import io;
+
+int main(int argc, const char** argv) {
+    std::cout << "Hello imported module!" << std::endl;
+    return 0;
+}
+```
+
+Exporting a function is as simple as pre-fixing the signature with `export`.
+
+```cpp
+export module M;
+
+export void Foo() {...};
+```
+
+Items **not** prefixed by `export` are by default visible only within the module.
+
+Anything can be exported, including template constructs, except for entities
+with internal linkage i.e. members of anonymous namespaces and static variables.
+
+### Compilation
+
+Each unit has to be pre-compiled before the unit that imports it.
+
+To compile code which imports system modules like:
+
+```cpp
+// import_test.cpp
+import <iostream>;
+
+int main(int argc, const char** argv) {
+    std::cout << "Hello Modules!" << std::endl;
+    return 0;
+}
+```
+you do this:
+
+#### `gcc`
+
+Add `-std=c++20 -fmodules-ts` to the command line and precompile `iostream`.
+
+1) Generate system module.
+
+      `g++ -std=c++20 -fmodules-ts -xc++-system-header iostream`
+       
+      generates:
+
+      `gcm.cache/usr/include/c++/11/iostream.gcm`
+
+2) Build executable
+
+
+      `g++ -std=c++20 -fmodules-ts ../import_test.cpp`
+
+
+
+#### `clang`
+
+No requirement to build system modules in this case in case `libc++` used.
+Just add `-std=c++20 -fmodules` to the command line.
+
+`clang++ -std=c++20 -fmodules -stdlib=libc++ ../import_test.cpp`
+
+In this case nothing gets generated in the local directory.
+
+
+## Developing modules
+
+The following code exports a function.
+
+```cpp
+// my_module.cpp
+export module MyModule;
+import <iostream>;
+namespace MyModule { // namespace works as usual
+export void Foo() {std::cout << "Hello from 'MyModule'" << std::endl;}
+}
+```
+
+And this code imports the module and invokes the function.
+
+```cpp
+// main.cpp
+import MyModule;
+
+int main(int, char**) {
+  MyModule::Foo(); // invokes <namespace>::<function>
+                   // no relation between namespace and module name
+  return 0;
+}
+```
+
+When compiling custom modules, nothing changes for `gcc` but with `clang` the
+process is more convoluted because it requires manually generating the
+module interface files (`.pcm`) for each module.
+
+**`gcc`**:
+
+If `iostream` was already compiled, no need to re-build if not:
+
+```sh
+g++ -std=c++20 -fmodules-ts -xc++-system-header iostream
+```
+
+build module and main:
+
+```sh
+g++ -std=c++20 -fmodules-ts my_module.cpp main.cpp
+```
+
+Done!
+
+**`clang`**:
+
+`clang` requires manually compiling each module then set the path to make the `.pcm`
+files findable.
+CLang supports a module mapping DSL to create mapping between headers and modules
+with control over exported entities. But it also has the option to use builtin
+maps through the `-fbuiltin-module-map` flag.
+
+From CLang 13 documentation:
+
+  >Warning
+  >The module map language is not currently guaranteed to be stable between major revisions of Clang.
+
+
+Commands to build the executable follow:
+
+```sh
+FLAGS="-std=c++20 -stdlib=libc++ -fbuiltin-module-map -fmodules"
+
+clang++ $FLAGS -Xclang -emit-module-interface -c my_module.cpp -o MyModule.pcm
+
+clang++ $FLAGS -fprebuilt-module-path=. my_module.cpp main.cpp
+
+rm *.pcm
+```
+
+## Template support
+
+While attempting to export templated code I encountered quite a few issues
+documented here.
+
+Consider the following code which implements a module exporting a templated
+function and client code invoking it.
+
+```cpp
+//export_template.cpp
+export module t_io;
+import <iostream>;
+export
+template <typename T>
+void Print(const T& p) {
+  std::cout << p << std::endl;
+}
+
+//import_template.cpp
+import t_io;
+import <string>;
+int main(int argc, const char** argv) {
+    Print(std::string("Hello from main"));
+    return 0;
+}
+```
+
+Compiling with `gcc` as shown above works and the program produces the expected
+result.
+However:
+  * `#including` instead of `importing` `<iostream>` and invoking the function with `const char*` results in the pointer address being printed instead of a string
+  * `#including` instead of importing also results in an error when using `std::endl` and `char`s printed as integers
+  * `#including` `<string>` in `main` instead of importing results in an endless error message loop.
+  
+In general everything works if system includes are imported.
+
+With `clang` I was not able to compile, after several attempts, I kept getting
+errors such as:
+
+```sh
+In file included from ../import_template.cpp:1:
+ /home/ugovaretto/projects/cpp11-scratch/tmp-scratch/modules/build/../export_template.cpp:11:13: error: explicit specialization of 'char_traits<char>' must be imported from one of the following modules before it is required:
+         std.__string
+         std.iosfwd
+   std::cout << p << '\n';
+             ^
+ ../import_template.cpp:4:5: note: in instantiation of function template specialization 'Print<char [16]>' requested here
+     Print("Hello from main");
+     ^
+ /usr/lib/llvm-12/bin/../include/c++/v1/__string:354:29: note: explicit specialization declared here is not reachable
+ struct _LIBCPP_TEMPLATE_VIS char_traits<char>
+                             ^
+ In file included from ../import_template.cpp:1:
+ /home/ugovaretto/projects/cpp11-scratch/tmp-scratch/modules/build/../export_template.cpp:11:13: error: invalid operands to binary expression ('std::ostream' (aka 'basic_ostream<char>') and 'char const[16]')
+   std::cout << p << '\n';
+   ~~~~~~~~~ ^  ~
+ /usr/lib/llvm-12/bin/../include/c++/v1/cstddef:141:3: note: candidate function template not viable: no known conversion from 'std::ostream' (aka 'basic_ostream<char>') to 'std::byte' for 1st argument
+   operator<< (byte  __lhs, _Integer __shift) noexcept
+   ^
+ /usr/lib/llvm-12/bin/../include/c++/v1/ostream:1078:1: note: candidate template ignored: could not match 'shared_ptr<type-parameter-0-2>' against 'char const[16]'
+ operator<<(basic_ostream<_CharT, _Traits>& __os, shared_ptr<_Yp> const& __p)
+ ^
+ 2 errors generated.
+```
+
+importing `string` and `iosfwd` did not make any difference, also when using
+`std::endl` instead of `\n` I would get other errors.
+Looking at the error message it seems it's confusing `ostream::operator<<()` with
+the bitshift operator.
+Also, trying to print any other type other than `std::string` does not work as well.
+Perhaps I should be configuring compilation differently, but was not able to
+understand how so far.
+
+## Mixing `#include` and `import`
+
+If within a module there is the need to `#include` other files it can be done
+by declaring `module` as the first statement in the file then including files
+as needed before the module declaration (`module` *`<name>`*).
+
+I.e.:
+
+```cpp
+module;
+#include <sys/unistd.h>
+...
+export module Syslog;
+...
+```
+
+## Submodules, dependent modules, partitions
+
+It is possible to hierarchically create trees of dependent modules, called
+"*partitions*" using the `:` operator.
+
+As an example I am going to create the following hierarchy:
+
+  * **`top_module`** (public interface)
+    * **`top_module/child_1_module`** (public function through parent)
+    * **`top_module/child_2_module`** (private function)
+
+### Implementation
+
+Import module from main translation unit:
+
+```cpp
+import top_module;
+import <iostream>;
+
+int main(int argc, const char** argv) {
+    std::cout <<  std::endl;
+    std::cout << "Main> Calling top_module from Main..." << std::endl;
+    top_module::Print();
+    std::cout << "Main> Calling child 1 module from Main..." << std::endl;
+    top_module::child_1_module::Print();
+    std::cout <<  std::endl;
+    return 0;
+}
+```
+
+Create top-level module (public interface):
+
+```cpp
+export module top_module;
+import<iostream>;
+export import : top_module.child_1_module;
+import : top_module.child_2_module;
+
+export namespace top_module {
+void Print() {
+    std::cout << "Top> Hello from top module" << std::endl;
+    std::cout << "Top> calling child_2_module..." << std::endl;
+    child_2_module::Print();
+}
+}  // namespace top_module
+```
+
+Create a child module with a public function:
+
+```cpp
+export module top_module : top_module.child_1_module;
+import<iostream>;
+
+export namespace top_module::child_1_module {
+void Print() { std::cout << "Top.Child 1> Hello from top.child_1 module" << std::endl; }
+}  // namespace top_module::child_1_module
+```
+
+Create a child module with a function only exposed to its parent:
+
+```cpp
+module top_module : top_module.child_2_module;
+import<iostream>;
+
+namespace top_module::child_2_module {
+void Print() {
+    std::cout << "Top.Child 2> Hello from hidden top.child_2 module" << std::endl;
+}
+}  // namespace top_module::child_2_module
+
+```
+
+## Coding conventions
+
+I am not aware of any specific accepted coding convention related to modules.
+
+As you can see from the above code, because the character `.` is a valid
+character for module names, I did encode dependency/hierarchy information in both
+the module name and the namespace, however, there is no requirement to map
+module names to files or namespaces and the dot character in module names has
+no semantic implications.
+
+## References
+
+[source code](https://github.com/ugovaretto/cpp11-scratch/tree/master/training/modules)
+[clang](https://clang.llvm.org/docs/Modules.html)
+[gcc 1](https://gcc.gnu.org/wiki/cxx-modules)
+[gcc 2](https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Modules.html)
+[cppreference](https://en.cppreference.com/w/cpp/language/modules)

@@ -448,7 +448,11 @@ no semantic implications.
 ## References
 
 [source code](https://github.com/ugovaretto/cpp11-scratch/tree/master/training/modules)
+
 [clang](https://clang.llvm.org/docs/Modules.html)
+
 [gcc 1](https://gcc.gnu.org/wiki/cxx-modules)
+
 [gcc 2](https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Modules.html)
+
 [cppreference](https://en.cppreference.com/w/cpp/language/modules)

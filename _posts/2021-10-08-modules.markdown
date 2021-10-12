@@ -452,6 +452,17 @@ the module name and the namespace, however, there is no requirement to map
 module names to files or namespaces and the dot character in module names has
 no semantic implications.
 
+## Tooling
+
+As mentioned in other parts of this article the compiler interface varies greatly
+across compilers, requiring a significant effort to create portable compilation
+scripts.
+`CMake` seems to have some support for modules when building with `ninja`,
+but not a full abstraction, requiring explicit per-compiler configuration through
+command line parameters.
+For reference: [Stackoverflow discussion](https://stackoverflow.com/questions/67747264/build-c-module-with-cmakes-experimental-module-dependency-scanning).
+
+
 ## References
 
 [source code](https://github.com/ugovaretto/cpp11-scratch/tree/master/training/modules)
@@ -461,5 +472,7 @@ no semantic implications.
 [gcc 1](https://gcc.gnu.org/wiki/cxx-modules)
 
 [gcc 2](https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Modules.html)
+
+[msvc](https://devblogs.microsoft.com/cppblog/using-cpp-modules-in-msvc-from-the-command-line-part-1/)
 
 [cppreference](https://en.cppreference.com/w/cpp/language/modules)

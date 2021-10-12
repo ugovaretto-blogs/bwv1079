@@ -39,7 +39,7 @@ I also had a look at `msvc` which does have support for modules and seems to
 be similar to `clang` in regard to requiring explitic module interface generation,
 it does have however also have an explicit argument to handle internal partitions.
 `msvc` has about 11 command line switches to configure module compilation. A link
-to a fairly recent blog article from microsoft is listed in the [References] section.
+to a fairly recent blog article from microsoft is listed in the [References](# References) section.
 
 
 ## `import` vs `#include`

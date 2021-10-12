@@ -35,6 +35,13 @@ gcc-11 (Ubuntu 11.1.0-1ubuntu1~21.04) 11.1.0
 Ubuntu clang version 12.0.0-3ubuntu1~21.04.2
 ```
 
+I also had a look at `msvc` which does have support for modules and seems to
+be similar to `clang` in regard to requiring explitic module interface generation,
+it does have however also have an explicit argument to handle internal partitions.
+`msvc` has about 11 command line switches to configure module compilation. A link
+to a fairly recent blog article from microsoft is listed in the [References] section.
+
+
 ## `import` vs `#include`
 
 When `#including` code into a file we are physically copying and pasting lines

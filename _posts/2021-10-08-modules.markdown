@@ -36,8 +36,8 @@ Ubuntu clang version 12.0.0-3ubuntu1~21.04.2
 ```
 
 I also had a look at `msvc` which does have support for modules and seems to
-be similar to `clang` in regard to requiring explitic module interface generation,
-it does have however also have an explicit argument to handle internal partitions.
+be similar to `clang` in regard to requiring explicit module interface generation,
+it also has an explicit argument to handle internal partitions.
 `msvc` has about 11 command line switches to configure module compilation. A link
 to a fairly recent blog article from microsoft is listed in the [References](#References) section.
 
@@ -107,7 +107,7 @@ When it comes to compiling, *gcc* and *clang* exhibit very different behavior.
 of system headers.
 
 ### `clang`
-`clang` comes with pre-compiled system modules when using `libc++`, however as we have
+`clang` comes with pre-compiled system modules when using `libc++`, however, as we have
 seen above, optimization flags do have an effect on compiled headers,
 and it's not clear how such headers have been pre-compiled, but given the fact
 that clang seems to be storing the AST inside modules it might be that all

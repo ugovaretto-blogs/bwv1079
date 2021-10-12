@@ -231,6 +231,7 @@ import MyModule;
 int main(int, char**) {
   MyModule::Foo(); // invokes <namespace>::<function>
                    // no relation between namespace and module name
+                   // just a coding convention used here
   return 0;
 }
 ```

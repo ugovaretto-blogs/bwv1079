@@ -467,6 +467,8 @@ For reference: [Stackoverflow discussion](https://stackoverflow.com/questions/67
 
 [source code](https://github.com/ugovaretto/cpp11-scratch/tree/master/training/modules)
 
+[cppreference](https://en.cppreference.com/w/cpp/language/modules)
+
 [clang](https://clang.llvm.org/docs/Modules.html)
 
 [gcc 1](https://gcc.gnu.org/wiki/cxx-modules)
@@ -475,4 +477,4 @@ For reference: [Stackoverflow discussion](https://stackoverflow.com/questions/67
 
 [msvc](https://devblogs.microsoft.com/cppblog/using-cpp-modules-in-msvc-from-the-command-line-part-1/)
 
-[cppreference](https://en.cppreference.com/w/cpp/language/modules)
+[Moving a project to C++ named Modules](https://devblogs.microsoft.com/cppblog/moving-a-project-to-cpp-named-modules/)
